@@ -1,0 +1,14 @@
+== Changelog ==
+
+= 1.1.2 =
+*	Fixed issue with inaccurate search results.
+*	Modified notice display position and timeout duration.
+*	Updated table list item color for improved readability.
+*	Updated scheduling logic for user review timestamps.
+
+= 1.0.1 =
+*	Fixed namespace issues. 
+*   Added premium plugin support.
+
+= 1.0.0 =
+*	Initial release.

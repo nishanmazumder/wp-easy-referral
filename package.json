@@ -1,0 +1,37 @@
+{
+  "name": "mail-manager-wpforms",
+  "version": "1.0.0",
+  "description": "This database add-on for WPForms ensures all your entries are securely stored and easily accessible",
+  "main": "index.js",
+  "scripts": {
+    "build": "wp-scripts build",
+    "check-engines": "wp-scripts check-engines",
+    "check-licenses": "wp-scripts check-licenses",
+    "format": "wp-scripts format",
+    "lint:css": "wp-scripts lint-style",
+    "lint:js": "wp-scripts lint-js",
+    "lint:md:docs": "wp-scripts lint-md-docs",
+    "lint:pkg-json": "wp-scripts lint-pkg-json",
+    "packages-update": "wp-scripts packages-update",
+    "plugin-zip": "wp-scripts plugin-zip",
+    "start": "wp-scripts start",
+    "test:e2e": "wp-scripts test-e2e",
+    "test:unit": "wp-scripts test-unit-js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "GPLv2",
+  "dependencies": {
+    "@wordpress/api-fetch": "^7.14.0",
+    "@wordpress/components": "^29.0.0",
+    "@wordpress/data": "^10.14.0",
+    "@wordpress/dom-ready": "^4.14.0",
+    "@wordpress/element": "^6.14.0",
+    "@wordpress/i18n": "^5.14.0",
+    "@wordpress/notices": "^5.14.0",
+    "@wordpress/scripts": "^30.7.0"
+  },
+  "devDependencies": {
+    "ajv": "^7.2.4"
+  }
+}
