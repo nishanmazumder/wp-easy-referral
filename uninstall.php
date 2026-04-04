@@ -22,6 +22,11 @@
  */
 
 // If uninstall not called from WordPress, then exit.
+
 if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 	exit;
 }
+
+delete_option( 'wpref_registration_form_ids' );
+delete_option( 'wpref_login_redirect' );
+delete_option( 'wpref_register_redirect' );
