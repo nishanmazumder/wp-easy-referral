@@ -1,232 +1,205 @@
 <?php
-/**
- * Plugin Name:       WP Easy Referral
- * Plugin URI:        https://mmw.diviaccessories.com/
- * Description:       Referral registration, phone login, Google login, frontend dashboard, admin entries, sharing, and referral tracking.
- * Version:           1.5.1
- * Requires at least: 6.5
- * Requires PHP:      7.4
- * Author:            Nishan
- * Author URI:        https://github.com/nishanmazumder
- * Text Domain:       wp-easy-referral
- * Domain Path:       /languages
- * License:           GPLv2 or later
- * License URI:       https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- */
+
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-if ( is_admin() && ! class_exists( 'WP_List_Table' ) ) {
+if ( ! class_exists( 'WP_List_Table' ) ) {
 	require_once ABSPATH . 'wp-admin/includes/class-wp-list-table.php';
 }
 
-if ( is_admin() ) {
+/**
+ * Admin list table for referral registration entries.
+ */
+final class WPERF_Referral_Entries_List_Table extends WP_List_Table {
+
 	/**
-	 * Admin list table for referral registration entries.
+	 * Table name.
+	 *
+	 * @var string
 	 */
-	final class WPERF_Referral_Entries_List_Table extends WP_List_Table {
+	private $table_name = '';
 
-		/**
-		 * Table name.
-		 *
-		 * @var string
-		 */
-		private $table_name = '';
+	/**
+	 * Constructor.
+	 *
+	 * @param string $table_name Entries table name.
+	 */
+	public function __construct( $table_name ) {
+		$this->table_name = $table_name;
 
-		/**
-		 * Constructor.
-		 *
-		 * @param string $table_name Entries table name.
-		 */
-		public function __construct( $table_name ) {
-			$this->table_name = $table_name;
-
-			parent::__construct(
-				array(
-					'singular' => 'wperf_referral_entry',
-					'plural'   => 'wperf_referral_entries',
-					'ajax'     => false,
-				)
-			);
-		}
-
-		/**
-		 * Return table columns.
-		 *
-		 * @return array
-		 */
-		public function get_columns() {
-			return array(
-				'cb'               => '<input type="checkbox" />',
-				'id'               => __( 'ID', 'wp-easy-referral' ),
-				'registered_at'    => __( 'Date', 'wp-easy-referral' ),
-				'name'             => __( 'Name', 'wp-easy-referral' ),
-				'email'            => __( 'Email', 'wp-easy-referral' ),
-				'phone'            => __( 'Phone', 'wp-easy-referral' ),
-				'referral_code'    => __( 'Referral Code', 'wp-easy-referral' ),
-				'referred_by_code' => __( 'Referred By', 'wp-easy-referral' ),
-				'source'           => __( 'Source', 'wp-easy-referral' ),
-			);
-		}
-
-		/**
-		 * Return sortable columns.
-		 *
-		 * @return array
-		 */
-		protected function get_sortable_columns() {
-			return array(
-				'id'            => array( 'id', true ),
-				'registered_at' => array( 'registered_at', true ),
-				'name'          => array( 'name', false ),
-				'email'         => array( 'email', false ),
-			);
-		}
-
-		/**
-		 * Checkbox column.
-		 *
-		 * @param object $item Row item.
-		 * @return string
-		 */
-		protected function column_cb( $item ) {
-			return '<input type="checkbox" name="entry_ids[]" value="' . absint( $item->id ) . '" />';
-		}
-
-		/**
-		 * Default column renderer.
-		 *
-		 * @param object $item        Row item.
-		 * @param string $column_name Column name.
-		 * @return string
-		 */
-		protected function column_default( $item, $column_name ) {
-			if ( 'source' === $column_name ) {
-				$source           = isset( $item->source ) ? sanitize_key( (string) $item->source ) : '';
-				$referred_by_code = isset( $item->referred_by_code ) ? sanitize_text_field( (string) $item->referred_by_code ) : '';
-
-				if ( 'referred' === $source || ( 'manual' === $source && '' !== $referred_by_code ) ) {
-					return esc_html__( 'Referred', 'wp-easy-referral' );
-				}
-
-				return esc_html__( 'Direct', 'wp-easy-referral' );
-			}
-
-			if ( isset( $item->$column_name ) ) {
-				return esc_html( (string) $item->$column_name );
-			}
-
-			return '';
-		}
-
-		/**
-		 * Name column with row action.
-		 *
-		 * @param object $item Row item.
-		 * @return string
-		 */
-		protected function column_name( $item ) {
-			$view_url = add_query_arg(
-				array(
-					'page'     => 'wperf-easy-referral',
-					'wperf_id' => absint( $item->id ),
-				),
-				admin_url( 'admin.php' )
-			);
-
-			$actions = array(
-				'view' => '<a href="' . esc_url( $view_url ) . '">' . esc_html__( 'View', 'wp-easy-referral' ) . '</a>',
-			);
-
-			return '<strong>' . esc_html( $item->name ) . '</strong> ' . $this->row_actions( $actions );
-		}
-
-		/**
-		 * Prepare table items.
-		 *
-		 * @return void
-		 */
-		public function prepare_items() {
-			global $wpdb;
-
-			$per_page     = 20;
-			$current_page = $this->get_pagenum();
-			$offset       = ( $current_page - 1 ) * $per_page;
-			$orderby      = isset( $_GET['orderby'] ) ? sanitize_key( wp_unslash( $_GET['orderby'] ) ) : 'registered_at';
-			$order        = isset( $_GET['order'] ) ? strtoupper( sanitize_key( wp_unslash( $_GET['order'] ) ) ) : 'DESC';
-			$order        = in_array( $order, array( 'ASC', 'DESC' ), true ) ? $order : 'DESC';
-			$allowed      = array( 'id', 'registered_at', 'name', 'email' );
-			$orderby      = in_array( $orderby, $allowed, true ) ? $orderby : 'registered_at';
-			$search       = isset( $_GET['s'] ) ? sanitize_text_field( wp_unslash( $_GET['s'] ) ) : '';
-			$start_date   = isset( $_GET['start_date'] ) ? sanitize_text_field( wp_unslash( $_GET['start_date'] ) ) : '';
-			$end_date     = isset( $_GET['end_date'] ) ? sanitize_text_field( wp_unslash( $_GET['end_date'] ) ) : '';
-			$where_sql    = 'WHERE 1=1';
-			$where_values = array();
-
-			if ( '' !== $search ) {
-				$like           = '%' . $wpdb->esc_like( $search ) . '%';
-				$where_sql     .= ' AND (name LIKE %s OR email LIKE %s OR phone LIKE %s OR referral_code LIKE %s OR referred_by_code LIKE %s)';
-				$where_values[] = $like;
-				$where_values[] = $like;
-				$where_values[] = $like;
-				$where_values[] = $like;
-				$where_values[] = $like;
-			}
-
-			if ( preg_match( '/^\d{4}-\d{2}-\d{2}$/', $start_date ) ) {
-				$where_sql     .= ' AND DATE(registered_at) >= %s';
-				$where_values[] = $start_date;
-			}
-
-			if ( preg_match( '/^\d{4}-\d{2}-\d{2}$/', $end_date ) ) {
-				$where_sql     .= ' AND DATE(registered_at) <= %s';
-				$where_values[] = $end_date;
-			}
-
-			$count_query = "SELECT COUNT(*) FROM {$this->table_name} {$where_sql}";
-			$data_query  = "SELECT * FROM {$this->table_name} {$where_sql} ORDER BY {$orderby} {$order} LIMIT %d OFFSET %d";
-
-			if ( ! empty( $where_values ) ) {
-				$total_items    = (int) $wpdb->get_var( $wpdb->prepare( $count_query, $where_values ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-				$where_values[] = $per_page;
-				$where_values[] = $offset;
-				$this->items    = $wpdb->get_results( $wpdb->prepare( $data_query, $where_values ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-			} else {
-				$total_items = (int) $wpdb->get_var( $count_query ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-				$this->items = $wpdb->get_results( $wpdb->prepare( $data_query, $per_page, $offset ) );
-			}
-
-			$this->_column_headers = array( $this->get_columns(), array(), $this->get_sortable_columns() );
-			$this->set_pagination_args(
-				array(
-					'total_items' => $total_items,
-					'per_page'    => $per_page,
-					'total_pages' => (int) ceil( $total_items / $per_page ),
-				)
-			);
-		}
+		parent::__construct(
+			array(
+				'singular' => 'wperf_referral_entry',
+				'plural'   => 'wperf_referral_entries',
+				'ajax'     => false,
+			)
+		);
 	}
 
+	/**
+	 * Return table columns.
+	 *
+	 * @return array
+	 */
+	public function get_columns() {
+		return array(
+			'cb'               => '<input type="checkbox" />',
+			'id'               => __( 'ID', 'wp-easy-referral' ),
+			'registered_at'    => __( 'Date', 'wp-easy-referral' ),
+			'name'             => __( 'Name', 'wp-easy-referral' ),
+			'email'            => __( 'Email', 'wp-easy-referral' ),
+			'phone'            => __( 'Phone', 'wp-easy-referral' ),
+			'referral_code'    => __( 'Referral Code', 'wp-easy-referral' ),
+			'referred_by_code' => __( 'Referred By', 'wp-easy-referral' ),
+			'source'           => __( 'Source', 'wp-easy-referral' ),
+		);
+	}
+
+	/**
+	 * Return sortable columns.
+	 *
+	 * @return array
+	 */
+	protected function get_sortable_columns() {
+		return array(
+			'id'            => array( 'id', true ),
+			'registered_at' => array( 'registered_at', true ),
+			'name'          => array( 'name', false ),
+			'email'         => array( 'email', false ),
+		);
+	}
+
+	/**
+	 * Checkbox column.
+	 *
+	 * @param object $item Row item.
+	 * @return string
+	 */
+	protected function column_cb( $item ) {
+		return '<input type="checkbox" name="entry_ids[]" value="' . absint( $item->id ) . '" />';
+	}
+
+	/**
+	 * Default column renderer.
+	 *
+	 * @param object $item        Row item.
+	 * @param string $column_name Column name.
+	 * @return string
+	 */
+	protected function column_default( $item, $column_name ) {
+		if ( isset( $item->$column_name ) ) {
+			return esc_html( (string) $item->$column_name );
+		}
+
+		return '';
+	}
+
+	/**
+	 * Name column with row action.
+	 *
+	 * @param object $item Row item.
+	 * @return string
+	 */
+	protected function column_name( $item ) {
+		$view_url = add_query_arg(
+			array(
+				'page'     => 'wperf-easy-referral',
+				'wperf_id' => absint( $item->id ),
+			),
+			admin_url( 'admin.php' )
+		);
+
+		$actions = array(
+			'view' => '<a href="' . esc_url( $view_url ) . '">' . esc_html__( 'View', 'wp-easy-referral' ) . '</a>',
+		);
+
+		return '<strong>' . esc_html( $item->name ) . '</strong> ' . $this->row_actions( $actions );
+	}
+
+	/**
+	 * Prepare table items.
+	 *
+	 * @return void
+	 */
+	public function prepare_items() {
+		global $wpdb;
+
+		$per_page     = 20;
+		$current_page = $this->get_pagenum();
+		$offset       = ( $current_page - 1 ) * $per_page;
+		$orderby      = isset( $_GET['orderby'] ) ? sanitize_key( wp_unslash( $_GET['orderby'] ) ) : 'registered_at';
+		$order        = isset( $_GET['order'] ) ? strtoupper( sanitize_key( wp_unslash( $_GET['order'] ) ) ) : 'DESC';
+		$order        = in_array( $order, array( 'ASC', 'DESC' ), true ) ? $order : 'DESC';
+		$allowed      = array( 'id', 'registered_at', 'name', 'email' );
+		$orderby      = in_array( $orderby, $allowed, true ) ? $orderby : 'registered_at';
+		$search       = isset( $_GET['s'] ) ? sanitize_text_field( wp_unslash( $_GET['s'] ) ) : '';
+		$start_date   = isset( $_GET['start_date'] ) ? sanitize_text_field( wp_unslash( $_GET['start_date'] ) ) : '';
+		$end_date     = isset( $_GET['end_date'] ) ? sanitize_text_field( wp_unslash( $_GET['end_date'] ) ) : '';
+		$where_sql    = 'WHERE 1=1';
+		$where_values = array();
+
+		if ( '' !== $search ) {
+			$like          = '%' . $wpdb->esc_like( $search ) . '%';
+			$where_sql    .= ' AND (name LIKE %s OR email LIKE %s OR phone LIKE %s OR referral_code LIKE %s OR referred_by_code LIKE %s)';
+			$where_values[] = $like;
+			$where_values[] = $like;
+			$where_values[] = $like;
+			$where_values[] = $like;
+			$where_values[] = $like;
+		}
+
+		if ( preg_match( '/^\d{4}-\d{2}-\d{2}$/', $start_date ) ) {
+			$where_sql    .= ' AND DATE(registered_at) >= %s';
+			$where_values[] = $start_date;
+		}
+
+		if ( preg_match( '/^\d{4}-\d{2}-\d{2}$/', $end_date ) ) {
+			$where_sql    .= ' AND DATE(registered_at) <= %s';
+			$where_values[] = $end_date;
+		}
+
+		$count_query = "SELECT COUNT(*) FROM {$this->table_name} {$where_sql}";
+		$data_query  = "SELECT * FROM {$this->table_name} {$where_sql} ORDER BY {$orderby} {$order} LIMIT %d OFFSET %d";
+
+		if ( ! empty( $where_values ) ) {
+			$total_items = (int) $wpdb->get_var( $wpdb->prepare( $count_query, $where_values ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+			$where_values[] = $per_page;
+			$where_values[] = $offset;
+			$this->items = $wpdb->get_results( $wpdb->prepare( $data_query, $where_values ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		} else {
+			$total_items = (int) $wpdb->get_var( $count_query ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+			$this->items = $wpdb->get_results( $wpdb->prepare( $data_query, $per_page, $offset ) );
+		}
+
+		$this->_column_headers = array( $this->get_columns(), array(), $this->get_sortable_columns() );
+		$this->set_pagination_args(
+			array(
+				'total_items' => $total_items,
+				'per_page'    => $per_page,
+				'total_pages' => (int) ceil( $total_items / $per_page ),
+			)
+		);
+	}
 }
 
 /**
  * Main plugin class.
  */
 final class WPERF_Referral_Auth_System {
-	const VERSION              = '1.5.1';
-	const ROLE_KEY             = 'referral_user';
-	const ROLE_NAME            = 'Referral User';
-	const DASHBOARD_SLUG       = 'referral-dashboard';
-	const SHARE_SLUG           = 'referral-share';
-	const QUERY_VAR_DASHBOARD  = 'wperf_referral_dashboard';
-	const QUERY_VAR_SHARE_CODE = 'wperf_referral_share_code';
-	const REFERRAL_COOKIE      = 'wperf_referral_code';
-	const OPTION_SETTINGS      = 'wperf_settings';
-	const OPTION_REG_PAGE      = 'wperf_registration_page_url';
-	const TABLE_REGISTRATIONS  = 'wperf_referral_registrations';
-	const NONCE_EXPORT         = 'wperf_export_entries';
+	const VERSION                  = '1.5.0';
+	const ROLE_KEY                 = 'referral_user';
+	const ROLE_NAME                = 'Referral User';
+	const DASHBOARD_SLUG           = 'referral-dashboard';
+	const SHARE_SLUG               = 'referral-share';
+	const QUERY_VAR_DASHBOARD      = 'wperf_referral_dashboard';
+	const QUERY_VAR_SHARE_CODE     = 'wperf_referral_share_code';
+	const REFERRAL_COOKIE          = 'wperf_referral_code';
+	const OPTION_SETTINGS          = 'wperf_settings';
+	const OPTION_REG_PAGE          = 'wperf_registration_page_url';
+	const TABLE_REGISTRATIONS      = 'wperf_referral_registrations';
+	const NONCE_EXPORT             = 'wperf_export_entries';
 
 	const META_REFERRAL_ID         = 'wperf_referral_id';
 	const META_PHONE               = 'wperf_phone';
@@ -244,7 +217,6 @@ final class WPERF_Referral_Auth_System {
 	 * @var string
 	 */
 	private $table_name = '';
-
 
 	/**
 	 * Constructor.
@@ -381,28 +353,10 @@ final class WPERF_Referral_Auth_System {
 	 * @return void
 	 */
 	public function register_assets() {
-		$css_file = plugin_dir_path( __FILE__ ) . 'assets/wperf-frontend.css';
-		$js_file  = plugin_dir_path( __FILE__ ) . 'assets/wperf-frontend.js';
-		$css_url  = plugins_url( 'assets/wperf-frontend.css', __FILE__ );
-		$js_url   = plugins_url( 'assets/wperf-frontend.js', __FILE__ );
-
-		wp_register_style(
-			'wperf-auth-system',
-			$css_url,
-			array(),
-			file_exists( $css_file ) ? (string) filemtime( $css_file ) : self::VERSION
-		);
-
-		wp_register_script(
-			'wperf-auth-system',
-			$js_url,
-			array(),
-			file_exists( $js_file ) ? (string) filemtime( $js_file ) : self::VERSION,
-			true
-		);
-
-		wp_enqueue_style( 'wperf-auth-system' );
-		wp_enqueue_script( 'wperf-auth-system' );
+		wp_register_style( 'wperf-auth-system', false, array(), self::VERSION );
+		wp_register_script( 'wperf-auth-system', false, array(), self::VERSION, true );
+		wp_add_inline_style( 'wperf-auth-system', $this->get_css() );
+		wp_add_inline_script( 'wperf-auth-system', $this->get_js() );
 	}
 
 	/**
@@ -615,11 +569,11 @@ final class WPERF_Referral_Auth_System {
 		$export_url = wp_nonce_url(
 			add_query_arg(
 				array(
-					'page'         => 'wperf-easy-referral',
+					'page'       => 'wperf-easy-referral',
 					'wperf_export' => 1,
-					'start_date'   => $start_date,
-					'end_date'     => $end_date,
-					's'            => $search,
+					'start_date' => $start_date,
+					'end_date'   => $end_date,
+					's'          => $search,
 				),
 				admin_url( 'admin.php' )
 			),
@@ -677,7 +631,7 @@ final class WPERF_Referral_Auth_System {
 				<tr><th><?php esc_html_e( 'Referral User Phone', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->referral_user_phone ); ?></td></tr>
 				<tr><th><?php esc_html_e( 'Referral Code', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->referral_code ); ?></td></tr>
 				<tr><th><?php esc_html_e( 'Referred By Code', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->referred_by_code ); ?></td></tr>
-				<tr><th><?php esc_html_e( 'Source', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( $this->get_source_label( (string) $entry->source, (string) $entry->referred_by_code ) ); ?></td></tr>
+				<tr><th><?php esc_html_e( 'Source', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->source ); ?></td></tr>
 			</tbody>
 		</table>
 		<?php
@@ -703,8 +657,8 @@ final class WPERF_Referral_Auth_System {
 		$where_values = array();
 
 		if ( '' !== $search ) {
-			$like           = '%' . $wpdb->esc_like( $search ) . '%';
-			$where_sql     .= ' AND (name LIKE %s OR email LIKE %s OR phone LIKE %s OR referral_code LIKE %s OR referred_by_code LIKE %s)';
+			$like          = '%' . $wpdb->esc_like( $search ) . '%';
+			$where_sql    .= ' AND (name LIKE %s OR email LIKE %s OR phone LIKE %s OR referral_code LIKE %s OR referred_by_code LIKE %s)';
 			$where_values[] = $like;
 			$where_values[] = $like;
 			$where_values[] = $like;
@@ -713,12 +667,12 @@ final class WPERF_Referral_Auth_System {
 		}
 
 		if ( preg_match( '/^\d{4}-\d{2}-\d{2}$/', $start_date ) ) {
-			$where_sql     .= ' AND DATE(registered_at) >= %s';
+			$where_sql    .= ' AND DATE(registered_at) >= %s';
 			$where_values[] = $start_date;
 		}
 
 		if ( preg_match( '/^\d{4}-\d{2}-\d{2}$/', $end_date ) ) {
-			$where_sql     .= ' AND DATE(registered_at) <= %s';
+			$where_sql    .= ' AND DATE(registered_at) <= %s';
 			$where_values[] = $end_date;
 		}
 
@@ -764,7 +718,7 @@ final class WPERF_Referral_Auth_System {
 					isset( $row['referral_user_phone'] ) ? $row['referral_user_phone'] : '',
 					isset( $row['referral_code'] ) ? $row['referral_code'] : '',
 					isset( $row['referred_by_code'] ) ? $row['referred_by_code'] : '',
-					$this->get_source_label( isset( $row['source'] ) ? (string) $row['source'] : '', isset( $row['referred_by_code'] ) ? (string) $row['referred_by_code'] : '' ),
+					isset( $row['source'] ) ? $row['source'] : '',
 					isset( $row['registered_at'] ) ? $row['registered_at'] : '',
 				)
 			);
@@ -912,15 +866,15 @@ final class WPERF_Referral_Auth_System {
 		$this->apply_referral_relationship( $user_id, $referred_by_code );
 		$this->insert_registration_entry(
 			array(
-				'user_id'             => $user_id,
-				'name'                => $display_name,
-				'email'               => $email,
-				'phone'               => $phone,
-				'referral_user_name'  => $referral_user_name,
-				'referral_user_phone' => $referral_user_phone,
-				'referral_code'       => (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true ),
-				'referred_by_code'    => (string) get_user_meta( $user_id, self::META_REFERRED_BY_CODE, true ),
-				'source'              => '' !== (string) get_user_meta( $user_id, self::META_REFERRED_BY_CODE, true ) ? 'referred' : 'direct',
+				'user_id'              => $user_id,
+				'name'                 => $display_name,
+				'email'                => $email,
+				'phone'                => $phone,
+				'referral_user_name'   => $referral_user_name,
+				'referral_user_phone'  => $referral_user_phone,
+				'referral_code'        => (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true ),
+				'referred_by_code'     => (string) get_user_meta( $user_id, self::META_REFERRED_BY_CODE, true ),
+				'source'               => 'manual',
 			)
 		);
 
@@ -1087,15 +1041,15 @@ final class WPERF_Referral_Auth_System {
 		if ( $is_new_user ) {
 			$this->insert_registration_entry(
 				array(
-					'user_id'             => $user->ID,
-					'name'                => $user->display_name,
-					'email'               => $user->user_email,
-					'phone'               => (string) get_user_meta( $user->ID, self::META_PHONE, true ),
-					'referral_user_name'  => '',
-					'referral_user_phone' => '',
-					'referral_code'       => (string) get_user_meta( $user->ID, self::META_REFERRAL_ID, true ),
-					'referred_by_code'    => (string) get_user_meta( $user->ID, self::META_REFERRED_BY_CODE, true ),
-					'source'              => '' !== (string) get_user_meta( $user->ID, self::META_REFERRED_BY_CODE, true ) ? 'referred' : 'direct',
+					'user_id'              => $user->ID,
+					'name'                 => $user->display_name,
+					'email'                => $user->user_email,
+					'phone'                => (string) get_user_meta( $user->ID, self::META_PHONE, true ),
+					'referral_user_name'   => '',
+					'referral_user_phone'  => '',
+					'referral_code'        => (string) get_user_meta( $user->ID, self::META_REFERRAL_ID, true ),
+					'referred_by_code'     => (string) get_user_meta( $user->ID, self::META_REFERRED_BY_CODE, true ),
+					'source'               => 'google',
 				)
 			);
 		}
@@ -1328,35 +1282,31 @@ final class WPERF_Referral_Auth_System {
 			'wperf_auth_tabs'
 		);
 
-		if ( $this->is_elementor_editor_request() ) {
-			return '<div class="wperf-card ' . esc_attr( $atts['class'] ) . '"><div class="wperf-logged-in"><h3 class="wperf-title">' . esc_html__( 'WP Easy Referral Form', 'wp-easy-referral' ) . '</h3><p class="wperf-copy">' . esc_html__( 'The form is disabled in Elementor editor preview to avoid builder script conflicts. View the page on the frontend to use the live login and registration form.', 'wp-easy-referral' ) . '</p></div></div>';
-		}
+		wp_enqueue_style( 'wperf-auth-system' );
+		wp_enqueue_script( 'wperf-auth-system' );
 
 		if ( is_user_logged_in() && $this->current_user_is_referral_user() ) {
 			ob_start();
 			?>
-				<div class="wperf-card <?php echo esc_attr( $atts['class'] ); ?>">
+			<div class="wperf-card <?php echo esc_attr( $atts['class'] ); ?>">
 				<div class="wperf-logged-in">
 					<h3 class="wperf-title"><?php esc_html_e( 'Welcome back', 'wp-easy-referral' ); ?></h3>
 					<p class="wperf-copy"><?php esc_html_e( 'You are already logged in.', 'wp-easy-referral' ); ?></p>
 					<div class="wperf-actions">
 						<a class="wperf-btn" href="<?php echo esc_url( $this->get_dashboard_url() ); ?>"><?php esc_html_e( 'Go to Dashboard', 'wp-easy-referral' ); ?></a>
-						<a class="wperf-btn wperf-btn-secondary" href="<?php echo esc_url( wp_logout_url( $this->get_registration_page_url() ) ); ?>"><?php esc_html_e( 'Logout', 'wp-easy-referral' ); ?></a>
+						<a class="wperf-btn wperf-btn-secondary" href="<?php echo esc_url( wp_logout_url( home_url( '/' ) ) ); ?>"><?php esc_html_e( 'Logout', 'wp-easy-referral' ); ?></a>
 					</div>
 				</div>
 			</div>
 			<?php
 			return ob_get_clean();
 		}
-		
 
 		$notice_code = isset( $_GET['wperf_notice'] ) ? sanitize_key( wp_unslash( $_GET['wperf_notice'] ) ) : '';
 		$active_tab  = isset( $_GET['wperf_tab'] ) ? sanitize_key( wp_unslash( $_GET['wperf_tab'] ) ) : 'login';
 		$active_tab  = in_array( $active_tab, array( 'login', 'register' ), true ) ? $active_tab : 'login';
 		$ref_data    = $this->get_current_referrer_data();
 		$ref_code    = isset( $ref_data['code'] ) ? (string) $ref_data['code'] : '';
-		
-		ob_start();
 		?>
 		<div class="wperf-card wperf-tabs-wrap <?php echo esc_attr( $atts['class'] ); ?>" data-wperf-tabs>
 			<div class="wperf-tab-nav" role="tablist" aria-label="<?php esc_attr_e( 'Authentication tabs', 'wp-easy-referral' ); ?>">
@@ -1368,34 +1318,33 @@ final class WPERF_Referral_Auth_System {
 				<h3 class="wperf-title"><?php echo esc_html( $atts['login_title'] ); ?></h3>
 				<p class="wperf-copy"><?php esc_html_e( 'Log in with your mobile number and password.', 'wp-easy-referral' ); ?></p>
 				<?php if ( '' !== $notice_code && 'login' === $active_tab ) : ?>
-					<div class="wperf-notice wperf-notice-error"><?php echo esc_html( $this->get_notice_message( $notice_code ) ); ?></div>
+					<div class="wperf-notice wperf-notice-warning"><?php echo esc_html( $this->get_notice_message( $notice_code ) ); ?></div>
 				<?php endif; ?>
 				<?php echo $this->render_phone_login_form(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 				<?php echo $this->render_google_login_button(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 			</div>
-	
+
 			<div class="wperf-tab-panel <?php echo ( 'register' === $active_tab ) ? 'is-active' : ''; ?>" id="wperf-panel-register">
 				<h3 class="wperf-title"><?php echo esc_html( $atts['register_title'] ); ?></h3>
 				<p class="wperf-copy"><?php esc_html_e( 'Create your account. Your referral code will be generated automatically.', 'wp-easy-referral' ); ?></p>
 				<?php if ( '' !== $notice_code && 'register' === $active_tab ) : ?>
-					<div class="wperf-notice wperf-notice-error"><?php echo esc_html( $this->get_notice_message( $notice_code ) ); ?></div>
+					<div class="wperf-notice wperf-notice-warning"><?php echo esc_html( $this->get_notice_message( $notice_code ) ); ?></div>
 				<?php endif; ?>
-
 				<form class="wperf-register-form" method="post" action="">
 					<div class="wperf-referral-highlight">
 						<div class="wperf-referral-grid">
 							<p>
-								<label for="wperf_referral_user_name"><?php esc_html_e( 'Your Referral\'s Name', 'wp-easy-referral' ); ?></label>
+								<label for="wperf_referral_user_name"><?php esc_html_e( 'Referral User', 'wp-easy-referral' ); ?></label>
 								<input type="text" id="wperf_referral_user_name" name="wperf_referral_user_name" value="<?php echo isset( $ref_data['name'] ) ? esc_attr( $ref_data['name'] ) : ''; ?>" />
 							</p>
 							<p>
-								<label for="wperf_referral_user_phone"><?php esc_html_e( 'Referral\'s Phone Number', 'wp-easy-referral' ); ?></label>
+								<label for="wperf_referral_user_phone"><?php esc_html_e( 'Referral User Phone', 'wp-easy-referral' ); ?></label>
 								<input type="text" id="wperf_referral_user_phone" name="wperf_referral_user_phone" value="<?php echo isset( $ref_data['phone'] ) ? esc_attr( $ref_data['phone'] ) : ''; ?>" />
 							</p>
 						</div>
 					</div>
 					<p>
-						<label for="wperf_display_name"><?php esc_html_e( 'Your Full Name', 'wp-easy-referral' ); ?></label>
+						<label for="wperf_display_name"><?php esc_html_e( 'Full Name', 'wp-easy-referral' ); ?></label>
 						<input type="text" id="wperf_display_name" name="wperf_display_name" required />
 					</p>
 					<p>
@@ -1415,12 +1364,8 @@ final class WPERF_Referral_Auth_System {
 					<?php wp_nonce_field( 'wperf_front_register', 'wperf_register_nonce' ); ?>
 					<p><button type="submit" class="wperf-btn"><?php esc_html_e( 'Register', 'wp-easy-referral' ); ?></button></p>
 				</form>
-
-								
 			</div>
 		</div>
-
-		<?php // return false; ?>
 		<?php
 		return (string) ob_get_clean();
 	}
@@ -1479,6 +1424,9 @@ final class WPERF_Referral_Auth_System {
 			return '<div class="wperf-notice wperf-notice-warning">' . esc_html__( 'Please log in to view your dashboard.', 'wp-easy-referral' ) . '</div>';
 		}
 
+		wp_enqueue_style( 'wperf-auth-system' );
+		wp_enqueue_script( 'wperf-auth-system' );
+
 		$user             = wp_get_current_user();
 		$settings         = $this->get_settings();
 		$referral_id      = (string) get_user_meta( $user->ID, self::META_REFERRAL_ID, true );
@@ -1486,7 +1434,6 @@ final class WPERF_Referral_Auth_System {
 		$referrals        = (int) get_user_meta( $user->ID, self::META_REFERRALS_COUNT, true );
 		$phone            = (string) get_user_meta( $user->ID, self::META_PHONE, true );
 		$referred_by      = (string) get_user_meta( $user->ID, self::META_REFERRED_BY_CODE, true );
-		$referred_by_name = $this->get_referred_by_display_name( $user->ID );
 		$brochure_url     = (string) $settings['brochure_url'];
 		$share_page_url   = $this->get_share_page_url( $referral_id );
 		$landing_reg_link = $this->get_registration_page_url_with_ref( $referral_id );
@@ -1502,7 +1449,7 @@ final class WPERF_Referral_Auth_System {
 						<p class="wperf-copy"><?php esc_html_e( 'View your profile, brochure, referral code, and referral progress.', 'wp-easy-referral' ); ?></p>
 					</div>
 					<div class="wperf-actions">
-						<a class="wperf-btn wperf-btn-secondary" href="<?php echo esc_url( wp_logout_url( $this->get_registration_page_url() ) ); ?>"><?php esc_html_e( 'Logout', 'wp-easy-referral' ); ?></a>
+						<a class="wperf-btn wperf-btn-secondary" href="<?php echo esc_url( wp_logout_url( home_url( '/' ) ) ); ?>"><?php esc_html_e( 'Logout', 'wp-easy-referral' ); ?></a>
 					</div>
 				</div>
 
@@ -1543,7 +1490,7 @@ final class WPERF_Referral_Auth_System {
 
 				<div class="wperf-profile-extra">
 					<strong><?php esc_html_e( 'Referred By:', 'wp-easy-referral' ); ?></strong>
-					<?php echo esc_html( '' !== $referred_by_name ? $referred_by_name : ( '' !== $referred_by ? $referred_by : __( 'Direct Registration', 'wp-easy-referral' ) ) ); ?>
+					<?php echo esc_html( '' !== $referred_by ? $referred_by : __( 'Direct Registration', 'wp-easy-referral' ) ); ?>
 				</div>
 
 				<h4 class="wperf-subtitle"><?php esc_html_e( 'Users You Referred', 'wp-easy-referral' ); ?></h4>
@@ -1574,6 +1521,8 @@ final class WPERF_Referral_Auth_System {
 		if ( get_query_var( self::QUERY_VAR_DASHBOARD ) ) {
 			status_header( 200 );
 			nocache_headers();
+			wp_enqueue_style( 'wperf-auth-system' );
+			wp_enqueue_script( 'wperf-auth-system' );
 			get_header();
 			echo '<main class="wperf-virtual-page">' . wp_kses_post( $this->render_user_dashboard() ) . '</main>';
 			get_footer();
@@ -1605,6 +1554,7 @@ final class WPERF_Referral_Auth_System {
 			return;
 		}
 
+		wp_enqueue_style( 'wperf-auth-system' );
 		$settings = $this->get_settings();
 		$cta_url  = $this->get_registration_page_url_with_ref( (string) get_user_meta( $user->ID, self::META_REFERRAL_ID, true ) );
 
@@ -1653,11 +1603,11 @@ final class WPERF_Referral_Auth_System {
 			return;
 		}
 
-		$settings  = $this->get_settings();
-		$share_url = $this->get_share_page_url( (string) $share_code );
-		$image_url = (string) $settings['share_bg_url'];
-		$title     = sprintf( __( '%s invited you', 'wp-easy-referral' ), $user->display_name );
-		$desc      = (string) $settings['share_message'];
+		$settings   = $this->get_settings();
+		$share_url  = $this->get_share_page_url( (string) $share_code );
+		$image_url  = (string) $settings['share_bg_url'];
+		$title      = sprintf( __( '%s invited you', 'wp-easy-referral' ), $user->display_name );
+		$desc       = (string) $settings['share_message'];
 
 		echo "\n";
 		echo '<meta property="og:type" content="website" />' . "\n";
@@ -1792,35 +1742,26 @@ final class WPERF_Referral_Auth_System {
 	/**
 	 * Get user by phone meta.
 	 *
-	 * Supports Bangladeshi mobile numbers stored with or without +88 / 88 / leading 0.
-	 *
 	 * @param string $phone Phone.
 	 * @return WP_User|null
 	 */
 	private function get_user_by_phone( $phone ) {
-		$candidates = $this->get_phone_lookup_candidates( $phone );
-
-		if ( empty( $candidates ) ) {
+		$phone = $this->normalize_phone( $phone );
+		if ( '' === $phone ) {
 			return null;
 		}
 
-		foreach ( $candidates as $candidate ) {
-			$users = get_users(
-				array(
-					'number'      => 1,
-					'count_total' => false,
-					'fields'      => 'all',
-					'meta_key'    => self::META_PHONE,
-					'meta_value'  => $candidate,
-				)
-			);
+		$users = get_users(
+			array(
+				'number'      => 1,
+				'count_total' => false,
+				'fields'      => 'all',
+				'meta_key'    => self::META_PHONE,
+				'meta_value'  => $phone,
+			)
+		);
 
-			if ( ! empty( $users[0] ) && $users[0] instanceof WP_User ) {
-				return $users[0];
-			}
-		}
-
-		return null;
+		return ! empty( $users[0] ) && $users[0] instanceof WP_User ? $users[0] : null;
 	}
 
 	/**
@@ -1931,90 +1872,16 @@ final class WPERF_Referral_Auth_System {
 	/**
 	 * Normalize phone value.
 	 *
-	 * Stores Bangladeshi mobile numbers in local 11-digit format like 01910035835.
-	 * Accepts input with +880, 880, 0, or 10-digit local format.
-	 *
 	 * @param string $phone Phone.
 	 * @return string
 	 */
 	private function normalize_phone( $phone ) {
 		$phone = preg_replace( '/[^0-9+]/', '', trim( (string) $phone ) );
-
-		if ( null === $phone || '' === $phone ) {
+		if ( null === $phone ) {
 			return '';
 		}
 
-		$phone = ltrim( $phone, '+' );
-
-		if ( 0 === strpos( $phone, '880' ) ) {
-			$phone = substr( $phone, 3 );
-		}
-
-		if ( 10 === strlen( $phone ) && '1' === substr( $phone, 0, 1 ) ) {
-			$phone = '0' . $phone;
-		}
-
-		if ( 11 === strlen( $phone ) && '0' === substr( $phone, 0, 1 ) ) {
-			return sanitize_text_field( $phone );
-		}
-
-		return '';
-	}
-
-	/**
-	 * Get phone lookup candidates.
-	 *
-	 * @param string $phone Phone.
-	 * @return array
-	 */
-	private function get_phone_lookup_candidates( $phone ) {
-		$normalized = $this->normalize_phone( $phone );
-
-		if ( '' === $normalized ) {
-			return array();
-		}
-
-		$ten_digit = substr( $normalized, 1 );
-
-		return array_values(
-			array_unique(
-				array(
-					$normalized,
-					'88' . $normalized,
-					'+88' . $normalized,
-					'880' . $ten_digit,
-					'+880' . $ten_digit,
-					$ten_digit,
-				)
-			)
-		);
-	}
-
-	/**
-	 * Check whether the current request is inside Elementor editor or preview.
-	 *
-	 * @return bool
-	 */
-	private function is_elementor_editor_request() {
-		if ( is_admin() ) {
-			return false;
-		}
-
-		if ( ! did_action( 'elementor/loaded' ) || ! class_exists( '\Elementor\Plugin' ) ) {
-			return false;
-		}
-
-		$plugin = \Elementor\Plugin::$instance;
-
-		if ( isset( $plugin->editor ) && method_exists( $plugin->editor, 'is_edit_mode' ) && $plugin->editor->is_edit_mode() ) {
-			return true;
-		}
-
-		if ( isset( $plugin->preview ) && method_exists( $plugin->preview, 'is_preview_mode' ) && $plugin->preview->is_preview_mode() ) {
-			return true;
-		}
-
-		return false;
+		return sanitize_text_field( $phone );
 	}
 
 	/**
@@ -2081,70 +1948,25 @@ final class WPERF_Referral_Auth_System {
 	 */
 	private function get_notice_message( $code ) {
 		$messages = array(
-			'invalid_request'        => __( 'Invalid request. Please try again.', 'wp-easy-referral' ),
-			'missing_fields'         => __( 'Please complete all required fields.', 'wp-easy-referral' ),
-			'phone_required'         => __( 'Mobile number is required.', 'wp-easy-referral' ),
-			'invalid_login'          => __( 'Invalid mobile number or password.', 'wp-easy-referral' ),
-			'invalid_email'          => __( 'Please provide a valid email address.', 'wp-easy-referral' ),
-			'weak_password'          => __( 'Password must be at least 6 characters.', 'wp-easy-referral' ),
-			'email_exists'           => __( 'This email is already registered.', 'wp-easy-referral' ),
-			'phone_exists'           => __( 'This mobile number is already registered.', 'wp-easy-referral' ),
-			'invalid_referral'       => __( 'Referral information is invalid.', 'wp-easy-referral' ),
-			'registration_failed'    => __( 'Registration failed. Please try again.', 'wp-easy-referral' ),
-			'google_not_configured'  => __( 'Google login is not configured yet.', 'wp-easy-referral' ),
-			'google_state_invalid'   => __( 'Google login session expired. Please try again.', 'wp-easy-referral' ),
-			'google_token_failed'    => __( 'Google token request failed.', 'wp-easy-referral' ),
-			'google_token_missing'   => __( 'Google access token is missing.', 'wp-easy-referral' ),
-			'google_userinfo_failed' => __( 'Could not retrieve your Google profile.', 'wp-easy-referral' ),
-			'google_email_missing'   => __( 'Your Google account did not return an email address.', 'wp-easy-referral' ),
+			'invalid_request'       => __( 'Invalid request. Please try again.', 'wp-easy-referral' ),
+			'missing_fields'        => __( 'Please complete all required fields.', 'wp-easy-referral' ),
+			'phone_required'        => __( 'Mobile number is required.', 'wp-easy-referral' ),
+			'invalid_login'         => __( 'Invalid mobile number or password.', 'wp-easy-referral' ),
+			'invalid_email'         => __( 'Please provide a valid email address.', 'wp-easy-referral' ),
+			'weak_password'         => __( 'Password must be at least 6 characters.', 'wp-easy-referral' ),
+			'email_exists'          => __( 'This email is already registered.', 'wp-easy-referral' ),
+			'phone_exists'          => __( 'This mobile number is already registered.', 'wp-easy-referral' ),
+			'invalid_referral'      => __( 'Referral information is invalid.', 'wp-easy-referral' ),
+			'registration_failed'   => __( 'Registration failed. Please try again.', 'wp-easy-referral' ),
+			'google_not_configured' => __( 'Google login is not configured yet.', 'wp-easy-referral' ),
+			'google_state_invalid'  => __( 'Google login session expired. Please try again.', 'wp-easy-referral' ),
+			'google_token_failed'   => __( 'Google token request failed.', 'wp-easy-referral' ),
+			'google_token_missing'  => __( 'Google access token is missing.', 'wp-easy-referral' ),
+			'google_userinfo_failed'=> __( 'Could not retrieve your Google profile.', 'wp-easy-referral' ),
+			'google_email_missing'  => __( 'Your Google account did not return an email address.', 'wp-easy-referral' ),
 		);
 
 		return isset( $messages[ $code ] ) ? $messages[ $code ] : __( 'Something went wrong.', 'wp-easy-referral' );
-	}
-
-	/**
-	 * Get admin source label.
-	 *
-	 * @param string $source           Stored source value.
-	 * @param string $referred_by_code Referred-by code.
-	 * @return string
-	 */
-	private function get_source_label( $source, $referred_by_code ) {
-		$source           = sanitize_key( (string) $source );
-		$referred_by_code = sanitize_text_field( (string) $referred_by_code );
-
-		if ( 'referred' === $source ) {
-			return __( 'Referred', 'wp-easy-referral' );
-		}
-
-		if ( 'direct' === $source ) {
-			return __( 'Direct', 'wp-easy-referral' );
-		}
-
-		if ( '' !== $referred_by_code ) {
-			return __( 'Referred', 'wp-easy-referral' );
-		}
-
-		return __( 'Direct', 'wp-easy-referral' );
-	}
-
-	/**
-	 * Get referrer display name for a user.
-	 *
-	 * @param int $user_id User ID.
-	 * @return string
-	 */
-	private function get_referred_by_display_name( $user_id ) {
-		$referrer_id = (int) get_user_meta( $user_id, self::META_REFERRED_BY_USER_ID, true );
-
-		if ( $referrer_id > 0 ) {
-			$referrer = get_userdata( $referrer_id );
-			if ( $referrer instanceof WP_User && '' !== (string) $referrer->display_name ) {
-				return (string) $referrer->display_name;
-			}
-		}
-
-		return '';
 	}
 
 	/**
@@ -2156,11 +1978,6 @@ final class WPERF_Referral_Auth_System {
 	 */
 	private function safe_redirect_with_notice( $tab, $notice ) {
 		$redirect_base = $this->get_registration_page_url();
-		$current_url   = $this->get_current_request_url();
-
-		if ( '' !== $current_url ) {
-			$redirect_base = $current_url;
-		}
 
 		$redirect_url = add_query_arg(
 			array(
@@ -2172,33 +1989,6 @@ final class WPERF_Referral_Auth_System {
 
 		wp_safe_redirect( $redirect_url );
 		exit;
-	}
-
-	/**
-	 * Get current request URL.
-	 *
-	 * @return string
-	 */
-	private function get_current_request_url() {
-		if ( empty( $_SERVER['HTTP_HOST'] ) || empty( $_SERVER['REQUEST_URI'] ) ) {
-			return '';
-		}
-
-		$scheme = is_ssl() ? 'https://' : 'http://';
-		$host   = sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ) );
-		$uri    = wp_unslash( $_SERVER['REQUEST_URI'] );
-		$uri    = preg_replace(
-			'/[
-].*/',
-			'',
-			(string) $uri
-		);
-
-		if ( null === $uri || '' === $uri ) {
-			return '';
-		}
-
-		return esc_url_raw( $scheme . $host . $uri );
 	}
 
 	/**
@@ -2262,7 +2052,7 @@ final class WPERF_Referral_Auth_System {
 	 * @return string
 	 */
 	private function get_css() {
-		return '.wperf-card{--wperf-bg:#ffffff;--wperf-text:#111827;--wperf-muted:#667085;--wperf-border:#e5e7eb;--wperf-primary:#111827;--wperf-shadow:0 20px 50px rgba(2,6,23,.08);max-width:920px;margin:0 auto;background:var(--wperf-bg);border:1px solid var(--wperf-border);border-radius:18px;box-shadow:var(--wperf-shadow);overflow:hidden}.wperf-tab-nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px;background:#f3f4f6;border-bottom:1px solid var(--wperf-border)}.wperf-tab-btn{border:0;border-radius:12px;background:transparent;color:#374151;font-size:15px;font-weight:600;padding:14px 18px;cursor:pointer}.wperf-tab-btn.is-active{background:#fff;color:#111827;box-shadow:0 4px 14px rgba(0,0,0,.06)}.wperf-tab-panel{display:none;padding:28px}.wperf-tab-panel.is-active{display:block}.wperf-title{margin:0 0 8px;font-size:28px;line-height:1.15;font-weight:700;color:var(--wperf-text)}.wperf-subtitle{margin:28px 0 14px;font-size:18px;font-weight:700;color:var(--wperf-text)}.wperf-copy{margin:0 0 24px;color:var(--wperf-muted);font-size:15px;line-height:1.65}.wperf-phone-login-form p,.wperf-register-form p{margin:0 0 18px}.wperf-phone-login-form label,.wperf-register-form label{display:block;margin:0 0 8px;font-size:14px;font-weight:600;color:var(--wperf-text)}.wperf-phone-login-form input[type=text],.wperf-phone-login-form input[type=email],.wperf-phone-login-form input[type=password],.wperf-register-form input[type=text],.wperf-register-form input[type=email],.wperf-register-form input[type=password]{width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box}.wperf-referral-highlight{background:#f8fafc;border:1px solid #dbe4ee;border-radius:14px;padding:16px 16px 0;margin:0 0 20px}.wperf-referral-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.wperf-btn{display:inline-flex!important;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:0 20px;border:0;border-radius:12px;font-size:15px;font-weight:700;text-decoration:none;cursor:pointer;background:var(--wperf-primary)!important;color:#fff!important}.wperf-btn-google{background:#fff!important;color:#111827!important;border:1px solid #d1d5db!important;width:100%;margin-top:12px}.wperf-google-icon{display:inline-flex;align-items:center}.wperf-btn-secondary{background:#fff!important;color:#111827!important;border:1px solid var(--wperf-border)!important}.wperf-actions,.wperf-share-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:18px}.wperf-logged-in,.wperf-dashboard{padding:30px}.wperf-notice{padding:14px 16px;border-radius:12px;font-size:14px;margin-bottom:18px}.wperf-notice-warning{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412}.wperf-notice-error{padding:0;margin:-6px 0 14px;border:0;background:transparent;color:#dc2626;font-size:12px;line-height:1.5}.wperf-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px}.wperf-stat-box{padding:18px;border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb}.wperf-stat-label{font-size:13px;color:#667085;margin-bottom:8px}.wperf-stat-value{font-size:22px;font-weight:700;color:#111827;word-break:break-word}.wperf-small{font-size:16px}.wperf-share-card-link{text-decoration:none}.wperf-share-card{position:relative;overflow:hidden;min-height:260px;border-radius:18px;padding:26px;display:flex;align-items:flex-end;color:#fff;margin-top:10px}.wperf-share-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(17,24,39,.15),rgba(17,24,39,.78))}.wperf-share-content{position:relative;z-index:2}.wperf-share-kicker{font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.9}.wperf-share-name{margin:10px 0 8px;font-size:30px;color:#fff}.wperf-share-code{display:inline-block;padding:10px 14px;border-radius:999px;background:rgba(255,255,255,.12);backdrop-filter:blur(6px);font-weight:700}.wperf-share-message{margin:16px 0 0;font-size:18px;max-width:420px;color:#fff}.wperf-share-link-box,.wperf-profile-extra{margin-top:16px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:12px;background:#fff}.wperf-table{width:100%;border-collapse:collapse}.wperf-table th,.wperf-table td{padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:left;font-size:14px}.wperf-virtual-page{padding:30px 16px}@media (max-width:767px){.wperf-tab-panel,.wperf-logged-in,.wperf-dashboard{padding:20px}.wperf-title{font-size:24px}.wperf-stats,.wperf-referral-grid{grid-template-columns:1fr}}';
+		return '.wperf-card{--wperf-bg:#ffffff;--wperf-text:#111827;--wperf-muted:#667085;--wperf-border:#e5e7eb;--wperf-primary:#111827;--wperf-shadow:0 20px 50px rgba(2,6,23,.08);max-width:920px;margin:0 auto;background:var(--wperf-bg);border:1px solid var(--wperf-border);border-radius:18px;box-shadow:var(--wperf-shadow);overflow:hidden}.wperf-tab-nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px;background:#f3f4f6;border-bottom:1px solid var(--wperf-border)}.wperf-tab-btn{border:0;border-radius:12px;background:transparent;color:#374151;font-size:15px;font-weight:600;padding:14px 18px;cursor:pointer}.wperf-tab-btn.is-active{background:#fff;color:#111827;box-shadow:0 4px 14px rgba(0,0,0,.06)}.wperf-tab-panel{display:none;padding:28px}.wperf-tab-panel.is-active{display:block}.wperf-title{margin:0 0 8px;font-size:28px;line-height:1.15;font-weight:700;color:var(--wperf-text)}.wperf-subtitle{margin:28px 0 14px;font-size:18px;font-weight:700;color:var(--wperf-text)}.wperf-copy{margin:0 0 24px;color:var(--wperf-muted);font-size:15px;line-height:1.65}.wperf-phone-login-form p,.wperf-register-form p{margin:0 0 18px}.wperf-phone-login-form label,.wperf-register-form label{display:block;margin:0 0 8px;font-size:14px;font-weight:600;color:var(--wperf-text)}.wperf-phone-login-form input[type=text],.wperf-phone-login-form input[type=email],.wperf-phone-login-form input[type=password],.wperf-register-form input[type=text],.wperf-register-form input[type=email],.wperf-register-form input[type=password]{width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box}.wperf-referral-highlight{background:#f8fafc;border:1px solid #dbe4ee;border-radius:14px;padding:16px 16px 0;margin:0 0 20px}.wperf-referral-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.wperf-btn{display:inline-flex!important;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:0 20px;border:0;border-radius:12px;font-size:15px;font-weight:700;text-decoration:none;cursor:pointer;background:var(--wperf-primary)!important;color:#fff!important}.wperf-btn-google{background:#fff!important;color:#111827!important;border:1px solid #d1d5db!important;width:100%;margin-top:12px}.wperf-google-icon{display:inline-flex;align-items:center}.wperf-btn-secondary{background:#fff!important;color:#111827!important;border:1px solid var(--wperf-border)!important}.wperf-actions,.wperf-share-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:18px}.wperf-logged-in,.wperf-dashboard{padding:30px}.wperf-notice{padding:14px 16px;border-radius:12px;font-size:14px;margin-bottom:18px}.wperf-notice-warning{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412}.wperf-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px}.wperf-stat-box{padding:18px;border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb}.wperf-stat-label{font-size:13px;color:#667085;margin-bottom:8px}.wperf-stat-value{font-size:22px;font-weight:700;color:#111827;word-break:break-word}.wperf-small{font-size:16px}.wperf-share-card-link{text-decoration:none}.wperf-share-card{position:relative;overflow:hidden;min-height:260px;border-radius:18px;padding:26px;display:flex;align-items:flex-end;color:#fff;margin-top:10px}.wperf-share-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(17,24,39,.15),rgba(17,24,39,.78))}.wperf-share-content{position:relative;z-index:2}.wperf-share-kicker{font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.9}.wperf-share-name{margin:10px 0 8px;font-size:30px;color:#fff}.wperf-share-code{display:inline-block;padding:10px 14px;border-radius:999px;background:rgba(255,255,255,.12);backdrop-filter:blur(6px);font-weight:700}.wperf-share-message{margin:16px 0 0;font-size:18px;max-width:420px;color:#fff}.wperf-share-link-box,.wperf-profile-extra{margin-top:16px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:12px;background:#fff}.wperf-table{width:100%;border-collapse:collapse}.wperf-table th,.wperf-table td{padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:left;font-size:14px}.wperf-virtual-page{padding:30px 16px}@media (max-width:767px){.wperf-tab-panel,.wperf-logged-in,.wperf-dashboard{padding:20px}.wperf-title{font-size:24px}.wperf-stats,.wperf-referral-grid{grid-template-columns:1fr}}';
 	}
 
 	/**
