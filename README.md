@@ -11,6 +11,9 @@ License URI: http://www.gnu.org/licenses/gpl-2.0.html
 Securely store and organize WPForms submissions with ease. Save and manage WPForms entries or mail (WPForms database) efficiently with this plugin.
 
 
+[ras_auth_tabs register_form_id="15968" login_redirect="/user-referral-dashboard/" register_redirect="/thank-you/"]
+
+
 == Description ==
 
 The "Mail Manager for WPForms" plugin saves WPForms entries to your WordPress database. It simply saves all incoming mail after activating this plugin.

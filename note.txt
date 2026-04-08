@@ -1,0 +1,20 @@
+Google Console redirect URI should be:
+http://localhost/healthyharvest/?wperf_google_login=1
+
+The old shortcode is now:
+[wperf_auth_tabs register_form_id="123"]
+The old dashboard shortcode is now:
+[wperf_user_dashboard]
+
+Template share:
+add_filter( 'wperf_share_template_html', function( $template, $user, $replacements ) {
+    return '
+        <div class="wperf-share-template-inner">
+            <div class="wperf-share-badge">Referral Program</div>
+            <h3 class="wperf-share-title">Custom Admin Managed Title</h3>
+            <p class="wperf-share-text">Referral code: {{referral_code}}</p>
+        </div>
+    ';
+}, 10, 3 );
+
+
