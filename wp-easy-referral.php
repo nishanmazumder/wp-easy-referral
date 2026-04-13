@@ -531,6 +531,7 @@ final class WPERF_Referral_Auth_System {
 			'referred_banner_text'         => isset( $input['referred_banner_text'] ) ? sanitize_textarea_field( (string) $input['referred_banner_text'] ) : $defaults['referred_banner_text'],
 			'shared_brochure_url'          => isset( $input['shared_brochure_url'] ) ? esc_url_raw( trim( (string) $input['shared_brochure_url'] ) ) : $defaults['shared_brochure_url'],
 			'shared_banner_bg_url'         => isset( $input['shared_banner_bg_url'] ) ? esc_url_raw( trim( (string) $input['shared_banner_bg_url'] ) ) : $defaults['shared_banner_bg_url'],
+			'facebook_share_title'         => isset( $input['facebook_share_title'] ) ? sanitize_text_field( (string) $input['facebook_share_title'] ) : $defaults['facebook_share_title'],
 			'project_links'                => isset( $input['project_links'] ) ? sanitize_textarea_field( (string) $input['project_links'] ) : $defaults['project_links'],
 		);
 	}
@@ -551,6 +552,7 @@ final class WPERF_Referral_Auth_System {
 			'referred_banner_text'         => __( 'Register now to continue and explore the brochure and projects.', 'wp-easy-referral' ),
 			'shared_brochure_url'          => '',
 			'shared_banner_bg_url'         => '',
+			'facebook_share_title'         => __( 'Unlock Special Offers on bti homes', 'wp-easy-referral' ),
 			'project_links'                => '',
 		);
 	}
@@ -600,6 +602,10 @@ final class WPERF_Referral_Auth_System {
 					<tr>
 						<th scope="row"><label for="wperf_share_message"><?php esc_html_e( 'Share Card Message', 'wp-easy-referral' ); ?></label></th>
 						<td><input type="text" class="regular-text" id="wperf_share_message" name="<?php echo esc_attr( self::OPTION_SETTINGS ); ?>[share_message]" value="<?php echo esc_attr( $settings['share_message'] ); ?>" /></td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wperf_facebook_share_title"><?php esc_html_e( 'Facebook Share Title', 'wp-easy-referral' ); ?></label></th>
+						<td><input type="text" class="regular-text" id="wperf_facebook_share_title" name="<?php echo esc_attr( self::OPTION_SETTINGS ); ?>[facebook_share_title]" value="<?php echo esc_attr( $settings['facebook_share_title'] ); ?>" /></td>
 					</tr>
 					<tr>
 						<th scope="row"><label for="wperf_registration_page_url"><?php esc_html_e( 'Registration Page URL', 'wp-easy-referral' ); ?></label></th>
@@ -808,7 +814,7 @@ final class WPERF_Referral_Auth_System {
 				<tr><th><?php esc_html_e( 'Email', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->email ); ?></td></tr>
 				<tr><th><?php esc_html_e( 'Phone', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->phone ); ?></td></tr>
 				<tr><th><?php esc_html_e( 'Referral User Name', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->referral_user_name ); ?></td></tr>
-				<tr><th><?php esc_html_e( 'Referral User Phone', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->referral_user_phone ); ?></td></tr>
+				<tr><th><?php esc_html_e( 'Referral\'s Phone', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->referral_user_phone ); ?></td></tr>
 				<tr><th><?php esc_html_e( 'Referral Code', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->referral_code ); ?></td></tr>
 				<tr><th><?php esc_html_e( 'Referred By Code', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->referred_by_code ); ?></td></tr>
 				<tr><th><?php esc_html_e( 'Source', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( $this->get_source_label( (string) $entry->source, (string) $entry->referred_by_code ) ); ?></td></tr>
@@ -877,7 +883,7 @@ final class WPERF_Referral_Auth_System {
 				'Email',
 				'Phone',
 				'Referral User Name',
-				'Referral User Phone',
+				'Referral\'s Phone Number',
 				'Referral Code',
 				'Referred By Code',
 				'Share Clicks',
@@ -1023,15 +1029,68 @@ final class WPERF_Referral_Auth_System {
 			$this->safe_redirect_with_notice( 'register', 'invalid_referral' );
 		}
 
-		if ( 'referred' === $form_context ) {
+		if ( 'referred' === $form_context || 'dashboard_referral' === $form_context ) {
+			$phone_exists = $this->get_user_by_phone( $phone ) instanceof WP_User;
+
+			if ( ! $phone_exists && 'dashboard_referral' === $form_context ) {
+				$phone_exists = $this->referral_entry_exists_by_phone( $phone );
+			} elseif ( ! $phone_exists ) {
+				$phone_exists = $this->referral_entry_exists_by_phone( $phone, $referred_by_code );
+			}
+
+			if ( $phone_exists ) {
+				$this->safe_redirect_with_notice( 'register', 'phone_exists' );
+			}
+
+			if ( 'dashboard_referral' === $form_context ) {
+				$username = $this->generate_unique_username( $display_name, '', $phone );
+				$user_id  = wp_insert_user(
+					array(
+						'user_login'   => $username,
+						'user_pass'    => wp_generate_password( 20, true, true ),
+						'user_email'   => '',
+						'display_name' => $display_name,
+						'first_name'   => $display_name,
+						'role'         => self::ROLE_KEY,
+					)
+				);
+
+				if ( is_wp_error( $user_id ) ) {
+					$this->safe_redirect_with_notice( 'register', 'registration_failed' );
+				}
+
+				update_user_meta( $user_id, self::META_PHONE, $phone );
+				update_user_meta( $user_id, self::META_REFERRAL_USER_NAME, $display_name );
+				update_user_meta( $user_id, self::META_REFERRAL_USER_PHONE, $phone );
+				$this->handle_user_register( $user_id );
+				$this->apply_referral_relationship( $user_id, $referred_by_code );
+
+				$this->insert_registration_entry(
+					array(
+						'user_id'              => $user_id,
+						'name'                 => $display_name,
+						'email'                => '',
+						'phone'                => $phone,
+						'referral_user_name'   => $display_name,
+						'referral_user_phone'  => $phone,
+						'referral_code'        => (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true ),
+						'referred_by_code'     => (string) get_user_meta( $user_id, self::META_REFERRED_BY_CODE, true ),
+						'source'               => 'referred',
+					)
+				);
+
+				wp_safe_redirect( add_query_arg( array( 'wperf_notice' => 'referral_added' ), $this->get_dashboard_url() ) );
+				exit;
+			}
+
 			$this->insert_registration_entry(
 				array(
 					'user_id'             => 0,
 					'name'                => $display_name,
 					'email'               => '',
 					'phone'               => $phone,
-					'referral_user_name'  => $referral_user_name,
-					'referral_user_phone' => $referral_user_phone,
+					'referral_user_name'  => $display_name,
+					'referral_user_phone' => $phone,
 					'referral_code'       => '',
 					'referred_by_code'    => $referred_by_code,
 					'source'              => 'referred',
@@ -1373,6 +1432,31 @@ final class WPERF_Referral_Auth_System {
 	}
 
 	/**
+	 * Check duplicate referral lead by phone and referral code.
+	 *
+	 * @param string $phone Phone number.
+	 * @param string $referred_by_code Referral code.
+	 * @return bool
+	 */
+	private function referral_entry_exists_by_phone( $phone, $referred_by_code = '' ) {
+		global $wpdb;
+
+		$phone = $this->normalize_phone( (string) $phone );
+		if ( '' === $phone ) {
+			return false;
+		}
+
+		if ( '' !== $referred_by_code ) {
+			$count = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$this->table_name} WHERE phone = %s AND referred_by_code = %s", $phone, sanitize_text_field( (string) $referred_by_code ) ) );
+			return $count > 0;
+		}
+
+		$count = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$this->table_name} WHERE phone = %s", $phone ) );
+		return $count > 0;
+	}
+
+
+	/**
 	 * Insert entry into custom registrations table.
 	 *
 	 * @param array $data Registration data.
@@ -1585,11 +1669,11 @@ final class WPERF_Referral_Auth_System {
 					<div class="wperf-referral-highlight">
 						<div class="wperf-referral-grid">
 							<p>
-								<label for="wperf_referral_user_name"><?php esc_html_e( 'Referral User', 'wp-easy-referral' ); ?></label>
+								<label for="wperf_referral_user_name"><?php esc_html_e( 'Your Referral Name', 'wp-easy-referral' ); ?></label>
 								<input type="text" id="wperf_referral_user_name" name="wperf_referral_user_name" value="<?php echo isset( $ref_data['name'] ) ? esc_attr( $ref_data['name'] ) : ''; ?>" />
 							</p>
 							<p>
-								<label for="wperf_referral_user_phone"><?php esc_html_e( 'Referral User Phone', 'wp-easy-referral' ); ?></label>
+								<label for="wperf_referral_user_phone"><?php esc_html_e( 'Referral\'s Phone Number', 'wp-easy-referral' ); ?></label>
 								<input type="text" id="wperf_referral_user_phone" name="wperf_referral_user_phone" value="<?php echo isset( $ref_data['phone'] ) ? esc_attr( $ref_data['phone'] ) : ''; ?>" />
 							</p>
 						</div>
@@ -1633,13 +1717,14 @@ final class WPERF_Referral_Auth_System {
 				<?php endif; ?>
 
 				<?php if ( $show_thanks ) : ?>
-					<div class="wperf-notice wperf-notice-success"><?php esc_html_e( 'Thank you. Your registration has been submitted successfully.', 'wp-easy-referral' ); ?></div>
+					<div class="wperf-notice wperf-notice-success" style="font-size:32px;line-height:1.25;"><?php esc_html_e( 'Thank you for sharing your valuable information. Our customer representative will call you shortly.', 'wp-easy-referral' ); ?></div>
 				<?php elseif ( '' !== $notice_code ) : ?>
 					<div class="wperf-notice wperf-notice-warning"><?php echo esc_html( $this->get_notice_message( $notice_code ) ); ?></div>
 				<?php endif; ?>
 
+				<?php if ( ! $show_thanks ) : ?>
 				<form class="wperf-register-form" method="post" action="" style="margin-top:25px;">
-					<p><label for="wperf_display_name_shared"><?php esc_html_e( 'Full Name', 'wp-easy-referral' ); ?></label><input type="text" id="wperf_display_name_shared" name="wperf_display_name" required /></p>
+					<p><label for="wperf_display_name_shared"><?php esc_html_e( 'Name', 'wp-easy-referral' ); ?></label><input type="text" id="wperf_display_name_shared" name="wperf_display_name" required /></p>
 					<p><label for="wperf_register_phone_shared"><?php esc_html_e( 'Mobile Number', 'wp-easy-referral' ); ?></label><input type="text" id="wperf_register_phone_shared" name="wperf_phone" required /></p>
 					<input type="hidden" name="wperf_referral_user_name" value="<?php echo isset( $ref_data['name'] ) ? esc_attr( $ref_data['name'] ) : ''; ?>" />
 					<input type="hidden" name="wperf_referral_user_phone" value="<?php echo isset( $ref_data['phone'] ) ? esc_attr( $ref_data['phone'] ) : ''; ?>" />
@@ -1649,13 +1734,25 @@ final class WPERF_Referral_Auth_System {
 					<?php wp_nonce_field( 'wperf_front_register', 'wperf_register_nonce' ); ?>
 					<p><button type="submit" class="wperf-btn"><?php esc_html_e( 'Register', 'wp-easy-referral' ); ?></button></p>
 				</form>
+				<?php endif; ?>
 
 				<?php if ( '' !== (string) $settings['shared_brochure_url'] ) : ?>
-					<div class="wperf-actions wperf-brochure-row"><a class="wperf-btn" href="<?php echo esc_url( $settings['shared_brochure_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Download Brochure', 'wp-easy-referral' ); ?></a></div>
+					<div class="wperf-actions wperf-brochure-row"><button type="button" class="wperf-btn" data-wperf-brochure-open="<?php echo esc_url( $settings['shared_brochure_url'] ); ?>"><?php esc_html_e( 'View Brouchure', 'wp-easy-referral' ); ?></button></div>
+					<div class="wperf-brochure-modal" hidden>
+						<div class="wperf-brochure-dialog">
+							<button type="button" class="wperf-brochure-close" data-wperf-brochure-close aria-label="<?php esc_attr_e( 'Close brochure', 'wp-easy-referral' ); ?>">×</button>
+							<div class="wperf-brochure-frame-wrap">
+								<iframe class="wperf-brochure-frame" src="" title="<?php esc_attr_e( 'Brochure Preview', 'wp-easy-referral' ); ?>"></iframe>
+							</div>
+							<div class="wperf-brochure-footer">
+								<a class="wperf-btn" href="" target="_blank" rel="noopener noreferrer" data-wperf-brochure-download><?php esc_html_e( 'Download Brochure', 'wp-easy-referral' ); ?></a>
+							</div>
+						</div>
+					</div>
 				<?php endif; ?>
 
 				<?php if ( ! empty( $projects ) ) : ?>
-					<h4 class="wperf-subtitle"><?php esc_html_e( 'Projects', 'wp-easy-referral' ); ?></h4>
+					<h4 class="wperf-subtitle"><?php esc_html_e( 'Project with special offer', 'wp-easy-referral' ); ?></h4>
 					<table class="wperf-table"><thead><tr><th><?php esc_html_e( 'Project', 'wp-easy-referral' ); ?></th><th><?php esc_html_e( 'Link', 'wp-easy-referral' ); ?></th></tr></thead><tbody>
 					<?php foreach ( $projects as $project ) : ?>
 						<tr><td><?php echo esc_html( $project['name'] ); ?></td><td><a href="<?php echo esc_url( $project['url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'View', 'wp-easy-referral' ); ?></a></td></tr>
@@ -1733,8 +1830,6 @@ final class WPERF_Referral_Auth_System {
 		$credits          = (int) get_user_meta( $user->ID, self::META_DISCOUNT_CREDITS, true );
 		$referrals        = (int) get_user_meta( $user->ID, self::META_REFERRALS_COUNT, true );
 		$phone            = (string) get_user_meta( $user->ID, self::META_PHONE, true );
-		$referred_by      = (string) get_user_meta( $user->ID, self::META_REFERRED_BY_CODE, true );
-		$referred_by_name = $this->get_referred_by_display_name( $user->ID );
 		$brochure_url     = (string) $settings['brochure_url'];
 		$share_page_url   = $this->get_share_page_url( $referral_id );
 		$landing_reg_link = $this->get_registration_page_url_with_ref( $referral_id );
@@ -1786,29 +1881,67 @@ final class WPERF_Referral_Auth_System {
 						<a class="wperf-btn" target="_blank" rel="noopener noreferrer" href="<?php echo esc_url( $whatsapp_share_url ); ?>"><?php esc_html_e( 'Share on WhatsApp', 'wp-easy-referral' ); ?></a>
 						<a class="wperf-btn wperf-btn-secondary" target="_blank" rel="noopener noreferrer" href="<?php echo esc_url( $facebook_share_url ); ?>"><?php esc_html_e( 'Share on Facebook', 'wp-easy-referral' ); ?></a>
 					</div>
-					<div class="wperf-share-link-box"><strong><?php esc_html_e( 'My Share Page:', 'wp-easy-referral' ); ?></strong> <span><?php echo esc_html( $share_page_url ); ?></span></div>
+					<div class="wperf-share-link-box"><strong><?php esc_html_e( 'My Referral Link', 'wp-easy-referral' ); ?></strong> <span><?php echo esc_html( $share_page_url ); ?></span></div>
 				</div>
+
+				<?php $dashboard_notice = isset( $_GET['wperf_notice'] ) ? sanitize_key( wp_unslash( $_GET['wperf_notice'] ) ) : ''; ?>
+				<?php if ( '' !== $dashboard_notice ) : ?>
+					<div class="wperf-notice <?php echo ( 'referral_added' === $dashboard_notice ) ? 'wperf-notice-warning' : 'wperf-notice-error'; ?>"><?php echo esc_html( $this->get_notice_message( $dashboard_notice ) ); ?></div>
+				<?php endif; ?>
 
 				<?php if ( '' !== $brochure_url ) : ?>
 					<div class="wperf-actions wperf-brochure-row">
-						<a class="wperf-btn" href="<?php echo esc_url( $brochure_url ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Download Brochure', 'wp-easy-referral' ); ?></a>
+						<button type="button" class="wperf-btn" data-wperf-brochure-open="<?php echo esc_url( $brochure_url ); ?>"><?php esc_html_e( 'View Brouchure', 'wp-easy-referral' ); ?></button>
+					</div>
+					<div class="wperf-brochure-modal" hidden>
+						<div class="wperf-brochure-dialog">
+							<button type="button" class="wperf-brochure-close" data-wperf-brochure-close aria-label="<?php esc_attr_e( 'Close brochure', 'wp-easy-referral' ); ?>">×</button>
+							<div class="wperf-brochure-frame-wrap">
+								<iframe class="wperf-brochure-frame" src="" title="<?php esc_attr_e( 'Brochure Preview', 'wp-easy-referral' ); ?>"></iframe>
+							</div>
+							<div class="wperf-brochure-footer">
+								<a class="wperf-btn" href="" target="_blank" rel="noopener noreferrer" data-wperf-brochure-download><?php esc_html_e( 'Download Brochure', 'wp-easy-referral' ); ?></a>
+							</div>
+						</div>
 					</div>
 				<?php endif; ?>
 
-				<div class="wperf-profile-extra">
-					<strong><?php esc_html_e( 'Referred By:', 'wp-easy-referral' ); ?></strong>
-					<?php echo esc_html( '' !== $referred_by_name ? $referred_by_name : ( '' !== $referred_by ? $referred_by : __( 'Direct Registration', 'wp-easy-referral' ) ) ); ?>
+				<div class="wperf-actions" style="justify-content:flex-end;">
+					<button type="button" class="wperf-btn" data-wperf-open-add-referral><?php esc_html_e( 'Add Referral User', 'wp-easy-referral' ); ?></button>
 				</div>
 
-				<h4 class="wperf-subtitle"><?php esc_html_e( 'Users You Referred', 'wp-easy-referral' ); ?></h4>
+				<div class="wperf-add-referral-modal" hidden>
+					<div class="wperf-brochure-dialog">
+						<button type="button" class="wperf-brochure-close" data-wperf-close-add-referral aria-label="<?php esc_attr_e( 'Close add referral form', 'wp-easy-referral' ); ?>">×</button>
+						<form class="wperf-register-form" method="post" action="">
+							<p>
+								<label for="wperf_add_referral_name"><?php esc_html_e( 'Name', 'wp-easy-referral' ); ?></label>
+								<input type="text" id="wperf_add_referral_name" name="wperf_display_name" required placeholder="<?php esc_attr_e( 'Name', 'wp-easy-referral' ); ?>" style="display:block;width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box;background:#fff;color:#111827;" />
+							</p>
+							<p>
+								<label for="wperf_add_referral_phone"><?php esc_html_e( 'Mobile Number', 'wp-easy-referral' ); ?></label>
+								<input type="text" id="wperf_add_referral_phone" name="wperf_phone" required placeholder="<?php esc_attr_e( 'Phone', 'wp-easy-referral' ); ?>" style="display:block;width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box;background:#fff;color:#111827;" />
+							</p>
+							<input type="hidden" name="wperf_referral_user_name" value="" />
+							<input type="hidden" name="wperf_referral_user_phone" value="" />
+							<input type="hidden" name="wperf_referred_by_code" value="<?php echo esc_attr( $referral_id ); ?>" />
+							<input type="hidden" name="wperf_form_context" value="dashboard_referral" />
+							<input type="hidden" name="wperf_action" value="register" />
+							<?php wp_nonce_field( 'wperf_front_register', 'wperf_register_nonce' ); ?>
+							<p><button type="submit" class="wperf-btn"><?php esc_html_e( 'Save Referral User', 'wp-easy-referral' ); ?></button></p>
+						</form>
+					</div>
+				</div>
+
+				<h4 class="wperf-subtitle"><?php esc_html_e( 'Your Referral List', 'wp-easy-referral' ); ?></h4>
 				<?php if ( empty( $children ) ) : ?>
 					<p class="wperf-copy"><?php esc_html_e( 'No referrals yet.', 'wp-easy-referral' ); ?></p>
 				<?php else : ?>
 					<table class="wperf-table">
-						<thead><tr><th><?php esc_html_e( 'Name', 'wp-easy-referral' ); ?></th><th><?php esc_html_e( 'Referral User', 'wp-easy-referral' ); ?></th><th><?php esc_html_e( 'Referral User Phone', 'wp-easy-referral' ); ?></th></tr></thead>
+						<thead><tr><th><?php esc_html_e( 'Your Referral’s Name', 'wp-easy-referral' ); ?></th><th><?php esc_html_e( 'Referral\'s Phone Number', 'wp-easy-referral' ); ?></th><th><?php esc_html_e( 'Status', 'wp-easy-referral' ); ?></th></tr></thead>
 						<tbody>
 							<?php foreach ( $children as $child ) : ?>
-								<tr><td><?php echo esc_html( $child['display_name'] ); ?></td><td><?php echo esc_html( $child['referral_user_name'] ); ?></td><td><?php echo esc_html( $child['referral_user_phone'] ); ?></td></tr>
+								<tr><td><?php echo esc_html( $child['referral_user_name'] ); ?></td><td><?php echo esc_html( $child['referral_user_phone'] ); ?></td><td><?php esc_html_e( 'Unverified', 'wp-easy-referral' ); ?></td></tr>
 							<?php endforeach; ?>
 						</tbody>
 					</table>
@@ -1831,7 +1964,9 @@ final class WPERF_Referral_Auth_System {
 			wp_enqueue_style( 'wperf-auth-system' );
 			wp_enqueue_script( 'wperf-auth-system' );
 			get_header();
-			echo '<main class="wperf-virtual-page">' . wp_kses_post( $this->render_user_dashboard() ) . '</main>';
+			echo '<main class="wperf-virtual-page">';
+			echo $this->render_user_dashboard(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			echo '</main>';
 			get_footer();
 			exit;
 		}
@@ -1913,7 +2048,7 @@ final class WPERF_Referral_Auth_System {
 		$settings   = $this->get_settings();
 		$share_url  = $this->get_share_page_url( (string) $share_code );
 		$image_url  = (string) $settings['share_bg_url'];
-		$title      = sprintf( __( '%s invited you', 'wp-easy-referral' ), $user->display_name );
+		$title      = ! empty( $settings['facebook_share_title'] ) ? (string) $settings['facebook_share_title'] : __( 'Unlock Special Offers on bti homes', 'wp-easy-referral' );
 		$desc       = (string) $settings['share_message'];
 
 		echo "\n";
@@ -1996,6 +2131,7 @@ final class WPERF_Referral_Auth_System {
 				'display_name'        => $user->display_name,
 				'user_email'          => $user->user_email,
 				'phone'               => (string) get_user_meta( $user->ID, self::META_PHONE, true ),
+				'referral_code'       => (string) get_user_meta( $user->ID, self::META_REFERRAL_ID, true ),
 				'referral_user_name'  => (string) get_user_meta( $user->ID, self::META_REFERRAL_USER_NAME, true ),
 				'referral_user_phone' => (string) get_user_meta( $user->ID, self::META_REFERRAL_USER_PHONE, true ),
 			);
@@ -2008,6 +2144,7 @@ final class WPERF_Referral_Auth_System {
 				'display_name'        => $self_name,
 				'user_email'          => '',
 				'phone'               => '',
+				'referral_code'       => (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true ),
 				'referral_user_name'  => $self_name,
 				'referral_user_phone' => $self_phone,
 			);
@@ -2015,13 +2152,14 @@ final class WPERF_Referral_Auth_System {
 
 		$referral_code = (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true );
 		if ( '' !== $referral_code ) {
-			$rows = $wpdb->get_results( $wpdb->prepare( "SELECT name, email, phone, referral_user_name, referral_user_phone FROM {$this->table_name} WHERE user_id = 0 AND referred_by_code = %s ORDER BY registered_at DESC", $referral_code ), ARRAY_A );
+			$rows = $wpdb->get_results( $wpdb->prepare( "SELECT name, email, phone, referral_code, referral_user_name, referral_user_phone FROM {$this->table_name} WHERE user_id = 0 AND referred_by_code = %s ORDER BY registered_at DESC", $referral_code ), ARRAY_A );
 			if ( is_array( $rows ) ) {
 				foreach ( $rows as $row ) {
 					$output[] = array(
 						'display_name'        => isset( $row['name'] ) ? (string) $row['name'] : '',
 						'user_email'          => isset( $row['email'] ) ? (string) $row['email'] : '',
 						'phone'               => isset( $row['phone'] ) ? (string) $row['phone'] : '',
+						'referral_code'       => isset( $row['referral_code'] ) ? (string) $row['referral_code'] : '',
 						'referral_user_name'  => isset( $row['referral_user_name'] ) ? (string) $row['referral_user_name'] : '',
 						'referral_user_phone' => isset( $row['referral_user_phone'] ) ? (string) $row['referral_user_phone'] : '',
 					);
@@ -2044,13 +2182,13 @@ final class WPERF_Referral_Auth_System {
 		$name_part  = substr( $name_part, 0, 20 );
 
 		for ( $attempts = 0; $attempts < 50; $attempts++ ) {
-			$code = 'Ref-' . $name_part . '-' . wp_rand( 1000, 9999 );
+			$code = $name_part . '-' . wp_rand( 1000, 9999 );
 			if ( ! $this->referral_code_exists( $code ) ) {
 				return $code;
 			}
 		}
 
-		return 'Ref-' . $name_part . '-' . time();
+		return $name_part . '-' . time();
 	}
 
 
@@ -2508,6 +2646,7 @@ final class WPERF_Referral_Auth_System {
 			'phone_exists'          => __( 'This mobile number is already registered.', 'wp-easy-referral' ),
 			'invalid_referral'      => __( 'Referral information is invalid.', 'wp-easy-referral' ),
 			'registration_failed'   => __( 'Registration failed. Please try again.', 'wp-easy-referral' ),
+			'referral_added'        => __( 'Referral user added successfully.', 'wp-easy-referral' ),
 			'google_not_configured' => __( 'Google login is not configured yet.', 'wp-easy-referral' ),
 			'google_state_invalid'  => __( 'Google login session expired. Please try again.', 'wp-easy-referral' ),
 			'google_token_failed'   => __( 'Google token request failed.', 'wp-easy-referral' ),
@@ -2675,7 +2814,7 @@ final class WPERF_Referral_Auth_System {
 	 * @return string
 	 */
 	private function get_css() {
-		return '.wperf-card{--wperf-bg:#ffffff;--wperf-text:#111827;--wperf-muted:#667085;--wperf-border:#e5e7eb;--wperf-primary:#111827;--wperf-shadow:0 20px 50px rgba(2,6,23,.08);max-width:920px;margin:0 auto;background:var(--wperf-bg);border:1px solid var(--wperf-border);border-radius:18px;box-shadow:var(--wperf-shadow);overflow:hidden}.wperf-tab-nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px;background:#f3f4f6;border-bottom:1px solid var(--wperf-border)}.wperf-tab-btn{border:0;border-radius:12px;background:transparent;color:#374151;font-size:15px;font-weight:600;padding:14px 18px;cursor:pointer}.wperf-tab-btn.is-active{background:#fff;color:#111827;box-shadow:0 4px 14px rgba(0,0,0,.06)}.wperf-tab-panel{display:none;padding:28px}.wperf-tab-panel.is-active{display:block}.wperf-title{margin:0 0 8px;font-size:28px;line-height:1.15;font-weight:700;color:var(--wperf-text)}.wperf-subtitle{margin:28px 0 14px;font-size:18px;font-weight:700;color:var(--wperf-text)}.wperf-copy{margin:0 0 24px;color:var(--wperf-muted);font-size:15px;line-height:1.65}.wperf-phone-login-form p,.wperf-register-form p{margin:0 0 18px}.wperf-phone-login-form label,.wperf-register-form label{display:block;margin:0 0 8px;font-size:14px;font-weight:600;color:var(--wperf-text)}.wperf-phone-login-form input[type=text],.wperf-phone-login-form input[type=email],.wperf-phone-login-form input[type=password],.wperf-register-form input[type=text],.wperf-register-form input[type=email],.wperf-register-form input[type=password]{width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box}.wperf-referral-highlight{background:#f8fafc;border:1px solid #dbe4ee;border-radius:14px;padding:16px 16px 0;margin:0 0 20px}.wperf-referral-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.wperf-btn{display:inline-flex!important;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:0 20px;border:0;border-radius:12px;font-size:15px;font-weight:700;text-decoration:none;cursor:pointer;background:var(--wperf-primary)!important;color:#fff!important}.wperf-btn-google{background:#fff!important;color:#111827!important;border:1px solid #d1d5db!important;width:100%;margin-top:12px}.wperf-google-icon{display:inline-flex;align-items:center}.wperf-btn-secondary{background:#fff!important;color:#111827!important;border:1px solid var(--wperf-border)!important}.wperf-actions,.wperf-share-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:18px}.wperf-logged-in,.wperf-dashboard{padding:30px}.wperf-notice{padding:14px 16px;border-radius:12px;font-size:14px;margin-bottom:18px}.wperf-notice-warning{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412}.wperf-notice-error{padding:0;margin:-6px 0 14px;border:0;background:transparent;color:#dc2626;font-size:12px;line-height:1.5}.wperf-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px}.wperf-stat-box{padding:18px;border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb}.wperf-stat-label{font-size:13px;color:#667085;margin-bottom:8px}.wperf-stat-value{font-size:22px;font-weight:700;color:#111827;word-break:break-word}.wperf-small{font-size:16px}.wperf-share-card-link{text-decoration:none}.wperf-share-card{position:relative;overflow:hidden;min-height:260px;border-radius:18px;padding:26px;display:flex;align-items:flex-end;color:#fff;margin-top:10px}.wperf-share-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(17,24,39,.15),rgba(17,24,39,.78))}.wperf-share-content{position:relative;z-index:2}.wperf-share-kicker{font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.9}.wperf-share-name{margin:10px 0 8px;font-size:30px;color:#fff}.wperf-share-code{display:inline-block;padding:10px 14px;border-radius:999px;background:rgba(255,255,255,.12);backdrop-filter:blur(6px);font-weight:700}.wperf-share-message{margin:16px 0 0;font-size:18px;max-width:420px;color:#fff}.wperf-share-link-box,.wperf-profile-extra{margin-top:16px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:12px;background:#fff}.wperf-table{width:100%;border-collapse:collapse}.wperf-table th,.wperf-table td{padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:left;font-size:14px}.wperf-virtual-page{padding:30px 16px}@media (max-width:767px){.wperf-tab-panel,.wperf-logged-in,.wperf-dashboard{padding:20px}.wperf-title{font-size:24px}.wperf-stats,.wperf-referral-grid{grid-template-columns:1fr}}';
+		return '.wperf-card{--wperf-bg:#ffffff;--wperf-text:#111827;--wperf-muted:#667085;--wperf-border:#e5e7eb;--wperf-primary:#111827;--wperf-shadow:0 20px 50px rgba(2,6,23,.08);max-width:920px;margin:0 auto;background:var(--wperf-bg);border:1px solid var(--wperf-border);border-radius:18px;box-shadow:var(--wperf-shadow);overflow:hidden}.wperf-tab-nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px;background:#f3f4f6;border-bottom:1px solid var(--wperf-border)}.wperf-tab-btn{border:0;border-radius:12px;background:transparent;color:#374151;font-size:15px;font-weight:600;padding:14px 18px;cursor:pointer}.wperf-tab-btn.is-active{background:#fff;color:#111827;box-shadow:0 4px 14px rgba(0,0,0,.06)}.wperf-tab-panel{display:none;padding:28px}.wperf-tab-panel.is-active{display:block}.wperf-title{margin:0 0 8px;font-size:28px;line-height:1.15;font-weight:700;color:var(--wperf-text)}.wperf-subtitle{margin:28px 0 14px;font-size:18px;font-weight:700;color:var(--wperf-text)}.wperf-copy{margin:0 0 24px;color:var(--wperf-muted);font-size:15px;line-height:1.65}.wperf-phone-login-form p,.wperf-register-form p{margin:0 0 18px}.wperf-phone-login-form label,.wperf-register-form label{display:block;margin:0 0 8px;font-size:14px;font-weight:600;color:var(--wperf-text)}.wperf-phone-login-form input[type=text],.wperf-phone-login-form input[type=email],.wperf-phone-login-form input[type=password],.wperf-register-form input[type=text],.wperf-register-form input[type=email],.wperf-register-form input[type=password]{width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box}.wperf-referral-highlight{background:#f8fafc;border:1px solid #dbe4ee;border-radius:14px;padding:16px 16px 0;margin:0 0 20px}.wperf-referral-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.wperf-btn{display:inline-flex!important;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:0 20px;border:0;border-radius:12px;font-size:15px;font-weight:700;text-decoration:none;cursor:pointer;background:var(--wperf-primary)!important;color:#fff!important}.wperf-btn-google{background:#fff!important;color:#111827!important;border:1px solid #d1d5db!important;width:100%;margin-top:12px}.wperf-google-icon{display:inline-flex;align-items:center}.wperf-btn-secondary{background:#fff!important;color:#111827!important;border:1px solid var(--wperf-border)!important}.wperf-actions,.wperf-share-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:18px}.wperf-logged-in,.wperf-dashboard{padding:30px}.wperf-notice{padding:14px 16px;border-radius:12px;font-size:14px;margin-bottom:18px}.wperf-notice-warning{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412}.wperf-notice-error{padding:0;margin:-6px 0 14px;border:0;background:transparent;color:#dc2626;font-size:12px;line-height:1.5}.wperf-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px}.wperf-stat-box{padding:18px;border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb}.wperf-stat-label{font-size:13px;color:#667085;margin-bottom:8px}.wperf-stat-value{font-size:22px;font-weight:700;color:#111827;word-break:break-word}.wperf-small{font-size:16px}.wperf-share-card-link{text-decoration:none}.wperf-share-card{position:relative;overflow:hidden;min-height:370px;border-radius:0;padding:26px;display:flex;align-items:flex-end;color:#fff;margin-top:10px}.wperf-share-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(17,24,39,.08),rgba(17,24,39,.58))}.wperf-share-content{position:relative;z-index:2}.wperf-share-kicker{font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.9}.wperf-share-name{margin:10px 0 8px;font-size:30px;color:#fff}.wperf-share-code{display:inline-block;padding:10px 14px;border-radius:999px;background:rgba(255,255,255,.12);backdrop-filter:blur(6px);font-weight:700}.wperf-share-message{margin:16px 0 0;font-size:18px;max-width:420px;color:#fff}.wperf-share-link-box,.wperf-profile-extra{margin-top:16px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:12px;background:#fff}.wperf-table{width:100%;border-collapse:collapse}.wperf-table th,.wperf-table td{padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:left;font-size:14px}.wperf-brochure-modal[hidden]{display:none!important}.wperf-brochure-modal{position:fixed;inset:0;z-index:99999;background:rgba(17,24,39,.72);padding:24px;display:flex;align-items:center;justify-content:center}.wperf-brochure-dialog{position:relative;width:min(960px,100%);max-height:90vh;background:#fff;border-radius:16px;padding:20px 20px 16px;box-sizing:border-box;display:flex;flex-direction:column;gap:14px}.wperf-brochure-close{position:absolute;top:10px;right:12px;border:0;background:transparent;font-size:28px;line-height:1;cursor:pointer;color:#111827}.wperf-brochure-frame-wrap{margin-top:22px}.wperf-brochure-frame{width:100%;height:min(70vh,720px);border:1px solid #e5e7eb;border-radius:10px;background:#fff}.wperf-brochure-footer{display:flex;justify-content:flex-end}.wperf-shared-banner-image{display:block;width:100%;height:auto;max-height:none;border-radius:0}.wperf-add-referral-modal[hidden]{display:none!important}.wperf-add-referral-modal{position:fixed;inset:0;z-index:99999;background:rgba(17,24,39,.72);padding:24px;display:flex;align-items:center;justify-content:center}.wperf-virtual-page{padding:30px 16px}@media (max-width:767px){.wperf-tab-panel,.wperf-logged-in,.wperf-dashboard{padding:20px}.wperf-title{font-size:24px}.wperf-stats,.wperf-referral-grid{grid-template-columns:1fr}}';
 	}
 
 	/**
@@ -2684,7 +2823,105 @@ final class WPERF_Referral_Auth_System {
 	 * @return string
 	 */
 	private function get_js() {
-		return "document.addEventListener('DOMContentLoaded',function(){var wrappers=document.querySelectorAll('[data-wperf-tabs]');if(!wrappers.length){return;}wrappers.forEach(function(wrapper){var buttons=wrapper.querySelectorAll('.wperf-tab-btn');var panels=wrapper.querySelectorAll('.wperf-tab-panel');function activateTab(target){buttons.forEach(function(button){button.classList.toggle('is-active',button.getAttribute('data-tab-target')===target);});panels.forEach(function(panel){panel.classList.toggle('is-active',panel.id==='wperf-panel-'+target);});}buttons.forEach(function(button){button.addEventListener('click',function(){activateTab(button.getAttribute('data-tab-target'));});});});});";
+		return <<<'JS'
+document.addEventListener('DOMContentLoaded', function () {
+	var wrappers = document.querySelectorAll('[data-wperf-tabs]');
+	if (wrappers.length) {
+		wrappers.forEach(function (wrapper) {
+			var buttons = wrapper.querySelectorAll('.wperf-tab-btn');
+			var panels = wrapper.querySelectorAll('.wperf-tab-panel');
+			function activateTab(target) {
+				buttons.forEach(function (button) {
+					button.classList.toggle('is-active', button.getAttribute('data-tab-target') === target);
+				});
+				panels.forEach(function (panel) {
+					panel.classList.toggle('is-active', panel.id === 'wperf-panel-' + target);
+				});
+			}
+			buttons.forEach(function (button) {
+				button.addEventListener('click', function () {
+					activateTab(button.getAttribute('data-tab-target'));
+				});
+			});
+		});
+	}
+
+	var brochureModal = document.querySelector('.wperf-brochure-modal[data-wperf-global-modal]');
+	if (!brochureModal) {
+		brochureModal = document.createElement('div');
+		brochureModal.className = 'wperf-brochure-modal';
+		brochureModal.setAttribute('data-wperf-global-modal', '1');
+		brochureModal.hidden = true;
+		brochureModal.innerHTML = '<div class="wperf-brochure-dialog"><button type="button" class="wperf-brochure-close" data-wperf-brochure-close aria-label="Close brochure">×</button><div class="wperf-brochure-frame-wrap"><iframe class="wperf-brochure-frame" src="" title="Brochure Preview"></iframe></div><div class="wperf-brochure-footer"><a class="wperf-btn" href="" target="_blank" rel="noopener noreferrer" data-wperf-brochure-download>Download Brochure</a></div></div>';
+		document.body.appendChild(brochureModal);
+	}
+
+	var brochureButtons = document.querySelectorAll('[data-wperf-brochure-open]');
+	brochureButtons.forEach(function (button) {
+		button.addEventListener('click', function () {
+			var url = button.getAttribute('data-wperf-brochure-open') || '';
+			var frame = brochureModal.querySelector('.wperf-brochure-frame');
+			var downloadLink = brochureModal.querySelector('[data-wperf-brochure-download]');
+			if (frame) {
+				frame.setAttribute('src', url);
+			}
+			if (downloadLink) {
+				downloadLink.setAttribute('href', url);
+			}
+			brochureModal.hidden = false;
+			document.body.style.overflow = 'hidden';
+		});
+	});
+
+	var closeBrochureModal = function () {
+		var frame = brochureModal.querySelector('.wperf-brochure-frame');
+		if (frame) {
+			frame.setAttribute('src', '');
+		}
+		brochureModal.hidden = true;
+		document.body.style.overflow = '';
+	};
+
+	brochureModal.addEventListener('click', function (event) {
+		if (event.target === brochureModal || event.target.closest('[data-wperf-brochure-close]')) {
+			closeBrochureModal();
+		}
+	});
+
+	var addReferralModal = document.querySelector('.wperf-add-referral-modal');
+	var openAddReferralButtons = document.querySelectorAll('[data-wperf-open-add-referral]');
+	var closeAddReferralButtons = document.querySelectorAll('[data-wperf-close-add-referral]');
+
+	openAddReferralButtons.forEach(function (button) {
+		button.addEventListener('click', function () {
+			if (!addReferralModal) {
+				return;
+			}
+			addReferralModal.hidden = false;
+			document.body.style.overflow = 'hidden';
+		});
+	});
+
+	closeAddReferralButtons.forEach(function (button) {
+		button.addEventListener('click', function () {
+			if (!addReferralModal) {
+				return;
+			}
+			addReferralModal.hidden = true;
+			document.body.style.overflow = '';
+		});
+	});
+
+	if (addReferralModal) {
+		addReferralModal.addEventListener('click', function (event) {
+			if (event.target === addReferralModal) {
+				addReferralModal.hidden = true;
+				document.body.style.overflow = '';
+			}
+		});
+	}
+});
+JS;
 	}
 }
 
