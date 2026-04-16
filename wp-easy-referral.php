@@ -1678,11 +1678,11 @@ final class WPERF_Referral_Auth_System {
 					<div class="wperf-referral-highlight">
 						<div class="wperf-referral-grid">
 							<p>
-								<label for="wperf_referral_user_name"><?php esc_html_e( 'Your Referral Name', 'wp-easy-referral' ); ?></label>
+								<label for="wperf_referral_user_name"><?php esc_html_e( 'Your Referral Name (optional)', 'wp-easy-referral' ); ?></label>
 								<input type="text" id="wperf_referral_user_name" name="wperf_referral_user_name" value="<?php echo isset( $ref_data['name'] ) ? esc_attr( $ref_data['name'] ) : ''; ?>" />
 							</p>
 							<p>
-								<label for="wperf_referral_user_phone"><?php esc_html_e( 'Referral\'s Phone Number', 'wp-easy-referral' ); ?></label>
+								<label for="wperf_referral_user_phone"><?php esc_html_e( 'Referral\'s Phone Number (optional)', 'wp-easy-referral' ); ?></label>
 								<input type="text" id="wperf_referral_user_phone" name="wperf_referral_user_phone" value="<?php echo isset( $ref_data['phone'] ) ? esc_attr( $ref_data['phone'] ) : ''; ?>" />
 							</p>
 						</div>
