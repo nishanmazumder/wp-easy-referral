@@ -1281,8 +1281,8 @@ final class WPERF_Referral_Auth_System {
 	 * Shortcode usage:
 	 * [wperf_auth_tabs]
 	 *
-	 * @param array $atts Shortcode attributes.
-	 * @return string
+	 * @param string $hook Current admin hook.
+	 * @return void
 	 */
 	public function render_auth_tabs( $atts ) {
 		$atts = shortcode_atts(
@@ -1294,6 +1294,130 @@ final class WPERF_Referral_Auth_System {
 			$atts,
 			'wperf_auth_tabs'
 		);
+	}
+
+	/**
+	 * Get settings.
+	 *
+	 * @return array
+	 */
+	private function get_settings() {
+		$settings = get_option( self::OPTION_SETTINGS, array() );
+
+		return wp_parse_args( is_array( $settings ) ? $settings : array(), self::get_default_settings() );
+	}
+
+	/**
+	 * Render settings page.
+	 *
+	 * @return void
+	 */
+	public function render_settings_page() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'You do not have permission to access this page.', 'wp-easy-referral' ) );
+		}
+
+		$settings = $this->get_settings();
+		?>
+		<div class="wrap">
+			<h1><?php esc_html_e( 'WP Easy Referral Settings', 'wp-easy-referral' ); ?></h1>
+			<form method="post" action="options.php">
+				<?php settings_fields( 'wperf_settings_group' ); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><label for="wperf_brochure_url"><?php esc_html_e( 'Brochure PDF URL', 'wp-easy-referral' ); ?></label></th>
+						<td>
+							<input type="url" class="regular-text" id="wperf_brochure_url" name="<?php echo esc_attr( self::OPTION_SETTINGS ); ?>[brochure_url]" value="<?php echo esc_attr( $settings['brochure_url'] ); ?>" />
+							<button type="button" class="button wperf-select-brochure"><?php esc_html_e( 'Select PDF', 'wp-easy-referral' ); ?></button>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wperf_share_bg_url"><?php esc_html_e( 'Share Card Background Image', 'wp-easy-referral' ); ?></label></th>
+						<td>
+							<input type="url" class="regular-text" id="wperf_share_bg_url" name="<?php echo esc_attr( self::OPTION_SETTINGS ); ?>[share_bg_url]" value="<?php echo esc_attr( $settings['share_bg_url'] ); ?>" />
+							<button type="button" class="button wperf-select-bg"><?php esc_html_e( 'Select Image', 'wp-easy-referral' ); ?></button>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wperf_share_message"><?php esc_html_e( 'Share Card Message', 'wp-easy-referral' ); ?></label></th>
+						<td><input type="text" class="regular-text" id="wperf_share_message" name="<?php echo esc_attr( self::OPTION_SETTINGS ); ?>[share_message]" value="<?php echo esc_attr( $settings['share_message'] ); ?>" /></td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wperf_facebook_share_title"><?php esc_html_e( 'Facebook Share Title', 'wp-easy-referral' ); ?></label></th>
+						<td><input type="text" class="regular-text" id="wperf_facebook_share_title" name="<?php echo esc_attr( self::OPTION_SETTINGS ); ?>[facebook_share_title]" value="<?php echo esc_attr( $settings['facebook_share_title'] ); ?>" /></td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wperf_registration_page_url"><?php esc_html_e( 'Registration Page URL', 'wp-easy-referral' ); ?></label></th>
+						<td>
+							<input type="url" class="regular-text" id="wperf_registration_page_url" name="<?php echo esc_attr( self::OPTION_SETTINGS ); ?>[registration_page_url]" value="<?php echo esc_attr( $settings['registration_page_url'] ); ?>" />
+							<p class="description"><?php esc_html_e( 'Set the page where the [wperf_auth_tabs] shortcode exists.', 'wp-easy-referral' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wperf_shared_registration_page_url"><?php esc_html_e( 'Shared Registration Page URL', 'wp-easy-referral' ); ?></label></th>
+						<td>
+							<input type="url" class="regular-text" id="wperf_shared_registration_page_url" name="<?php echo esc_attr( self::OPTION_SETTINGS ); ?>[shared_registration_page_url]" value="<?php echo esc_attr( $settings['shared_registration_page_url'] ); ?>" />
+							<p class="description"><?php esc_html_e( 'Set the page where the [wperf_referred_register] shortcode exists.', 'wp-easy-referral' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wperf_shared_banner_bg_url"><?php esc_html_e( 'Shared Page Banner Background', 'wp-easy-referral' ); ?></label></th>
+						<td>
+							<input type="url" class="regular-text" id="wperf_shared_banner_bg_url" name="<?php echo esc_attr( self::OPTION_SETTINGS ); ?>[shared_banner_bg_url]" value="<?php echo esc_attr( $settings['shared_banner_bg_url'] ); ?>" />
+							<button type="button" class="button wperf-select-bg" data-target="#wperf_shared_banner_bg_url"><?php esc_html_e( 'Select Image', 'wp-easy-referral' ); ?></button>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wperf_shared_banner_bg_mobile_url"><?php esc_html_e( 'Shared Page Mobile Banner Background', 'wp-easy-referral' ); ?></label></th>
+						<td>
+							<input type="url" class="regular-text" id="wperf_shared_banner_bg_mobile_url" name="<?php echo esc_attr( self::OPTION_SETTINGS ); ?>[shared_banner_bg_mobile_url]" value="<?php echo esc_attr( $settings['shared_banner_bg_mobile_url'] ); ?>" />
+							<button type="button" class="button wperf-select-bg" data-target="#wperf_shared_banner_bg_mobile_url"><?php esc_html_e( 'Select Image', 'wp-easy-referral' ); ?></button>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wperf_shared_brochure_url"><?php esc_html_e( 'Shared Page Brochure PDF', 'wp-easy-referral' ); ?></label></th>
+						<td>
+							<input type="url" class="regular-text" id="wperf_shared_brochure_url" name="<?php echo esc_attr( self::OPTION_SETTINGS ); ?>[shared_brochure_url]" value="<?php echo esc_attr( $settings['shared_brochure_url'] ); ?>" />
+							<button type="button" class="button wperf-select-brochure" data-target="#wperf_shared_brochure_url"><?php esc_html_e( 'Select PDF', 'wp-easy-referral' ); ?></button>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wperf_project_links"><?php esc_html_e( 'Project List', 'wp-easy-referral' ); ?></label></th>
+						<td>
+							<textarea class="large-text code" rows="6" id="wperf_project_links" name="<?php echo esc_attr( self::OPTION_SETTINGS ); ?>[project_links]"><?php echo esc_textarea( $settings['project_links'] ); ?></textarea>
+							<p class="description"><?php esc_html_e( 'One project per line in this format: Project Name | https://example.com', 'wp-easy-referral' ); ?></p>
+						</td>
+					</tr>
+				</table>
+				<?php submit_button(); ?>
+			</form>
+			<p><strong><?php esc_html_e( 'Google Redirect URI', 'wp-easy-referral' ); ?>:</strong> <code><?php echo esc_html( $this->get_google_redirect_uri() ); ?></code></p>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Handle entry deletion actions.
+	 *
+	 * @return void
+	 */
+	public function maybe_handle_delete_entries() {
+		if ( ! is_admin() || ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+
+		if ( ! isset( $_REQUEST['page'] ) || 'wperf-easy-referral' !== sanitize_key( wp_unslash( $_REQUEST['page'] ) ) ) {
+			return;
+		}
+
+		$action = '';
+		if ( isset( $_REQUEST['wperf_action'] ) ) {
+			$action = sanitize_key( wp_unslash( $_REQUEST['wperf_action'] ) );
+		} elseif ( isset( $_REQUEST['action'] ) && '-1' !== (string) wp_unslash( $_REQUEST['action'] ) ) {
+			$action = sanitize_key( wp_unslash( $_REQUEST['action'] ) );
+		} elseif ( isset( $_REQUEST['action2'] ) && '-1' !== (string) wp_unslash( $_REQUEST['action2'] ) ) {
+			$action = sanitize_key( wp_unslash( $_REQUEST['action2'] ) );
+		}
 
 		wp_enqueue_style( 'wperf-auth-system' );
 		wp_enqueue_script( 'wperf-auth-system' );
@@ -1719,8 +1843,9 @@ final class WPERF_Referral_Auth_System {
 			}
 		}
 
-		return 'REF-' . strtoupper( wp_generate_password( 12, false, false ) );
+		return $name_part . '-' . time();
 	}
+
 
 	/**
 	 * Check if referral code exists.
@@ -1999,6 +2124,7 @@ final class WPERF_Referral_Auth_System {
 			),
 			$redirect_base
 		);
+	}
 
 		wp_safe_redirect( $redirect_url );
 		exit;
@@ -2035,6 +2161,7 @@ final class WPERF_Referral_Auth_System {
 	/**
 	 * Get Google client ID.
 	 *
+	 * @param string $share_link Share link.
 	 * @return string
 	 */
 	private function get_google_client_id() {
