@@ -1,18 +1,5 @@
 <?php
-/**
- * Plugin Name:       WP Easy Referral
- * Plugin URI:        https://mmw.diviaccessories.com/
- * Description:       Referral registration, phone login, Google login, frontend dashboard, admin entries, sharing, and referral tracking.
- * Version:           1.6.0
- * Requires at least: 6.5
- * Requires PHP:      7.4
- * Author:            Nishan
- * Author URI:        https://github.com/nishanmazumder
- * Text Domain:       wp-easy-referral
- * Domain Path:       /languages
- * License:           GPLv2 or later
- * License URI:       https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
- */
+
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
@@ -69,8 +56,6 @@ final class WPERF_Referral_Entries_List_Table extends WP_List_Table {
 			'share_clicks'     => __( 'Share Clicks', 'wp-easy-referral' ),
 			'source'           => __( 'Source', 'wp-easy-referral' ),
 			'user_source'      => __( 'User Source', 'wp-easy-referral' ),
-			'status'           => __( 'Status', 'wp-easy-referral' ),
-			'remarks'          => __( 'Remarks', 'wp-easy-referral' ),
 		);
 	}
 
@@ -296,9 +281,6 @@ final class WPERF_Referral_Auth_System {
 		add_shortcode( 'wperf_auth_tabs', array( $this, 'render_auth_tabs' ) );
 		add_shortcode( 'wperf_user_dashboard', array( $this, 'render_user_dashboard' ) );
 		add_shortcode( 'wperf_referred_register', array( $this, 'render_referred_register_page' ) );
-		add_shortcode( 'wperf_lead_desk', array( $this, 'render_lead_desk_page' ) );
-
-		add_action( 'wp_ajax_wperf_update_lead', array( $this, 'ajax_update_lead' ) );
 
 		add_action( 'wp_enqueue_scripts', array( $this, 'register_assets' ) );
 		add_action( 'admin_menu', array( $this, 'register_admin_menus' ) );
@@ -331,14 +313,6 @@ final class WPERF_Referral_Auth_System {
 			)
 		);
 
-		add_role(
-			'referral_help_agent',
-			__( 'Referral Help Agent', 'wp-easy-referral' ),
-			array(
-				'read' => true,
-			)
-		);
-
 		$settings = get_option( self::OPTION_SETTINGS, array() );
 		if ( ! is_array( $settings ) ) {
 			$settings = array();
@@ -361,8 +335,6 @@ final class WPERF_Referral_Auth_System {
 			share_clicks bigint(20) unsigned NOT NULL DEFAULT 0,
 			source varchar(20) NOT NULL DEFAULT 'manual',
 			user_source varchar(50) NOT NULL DEFAULT '',
-			status varchar(50) NOT NULL DEFAULT 'Unverified',
-			remarks text,
 			registered_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY  (id),
 			KEY user_id (user_id),
@@ -405,20 +377,6 @@ final class WPERF_Referral_Auth_System {
 		$user_source_column = $wpdb->get_var( "SHOW COLUMNS FROM {$table_name} LIKE 'user_source'" );
 		if ( null === $user_source_column ) {
 			$wpdb->query( "ALTER TABLE {$table_name} ADD user_source varchar(50) NOT NULL DEFAULT '' AFTER source" );
-		}
-
-		$status_column = $wpdb->get_var( "SHOW COLUMNS FROM {$table_name} LIKE 'status'" );
-		if ( null === $status_column ) {
-			$wpdb->query( "ALTER TABLE {$table_name} ADD status varchar(50) NOT NULL DEFAULT 'Unverified' AFTER user_source" );
-		}
-
-		$remarks_column = $wpdb->get_var( "SHOW COLUMNS FROM {$table_name} LIKE 'remarks'" );
-		if ( null === $remarks_column ) {
-			$wpdb->query( "ALTER TABLE {$table_name} ADD remarks text AFTER status" );
-		}
-
-		if ( ! get_role( 'referral_help_agent' ) ) {
-			add_role( 'referral_help_agent', __( 'Referral Help Agent', 'wp-easy-referral' ), array( 'read' => true ) );
 		}
 	}
 
@@ -863,9 +821,6 @@ final class WPERF_Referral_Auth_System {
 				<tr><th><?php esc_html_e( 'Referral Code', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->referral_code ); ?></td></tr>
 				<tr><th><?php esc_html_e( 'Referred By Code', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->referred_by_code ); ?></td></tr>
 				<tr><th><?php esc_html_e( 'Source', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( $this->get_source_label( (string) $entry->source, (string) $entry->referred_by_code ) ); ?></td></tr>
-				<tr><th><?php esc_html_e( 'User Source', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->user_source ); ?></td></tr>
-				<tr><th><?php esc_html_e( 'Status', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->status ); ?></td></tr>
-				<tr><th><?php esc_html_e( 'Remarks', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->remarks ); ?></td></tr>
 			</tbody>
 		</table>
 		<?php
@@ -937,8 +892,6 @@ final class WPERF_Referral_Auth_System {
 				'Share Clicks',
 				'Source',
 				'User Source',
-				'Status',
-				'Remarks',
 				'Registered At',
 			)
 		);
@@ -959,8 +912,6 @@ final class WPERF_Referral_Auth_System {
 					isset( $row['share_clicks'] ) ? $row['share_clicks'] : '0',
 					$this->get_source_label( isset( $row['source'] ) ? (string) $row['source'] : '', isset( $row['referred_by_code'] ) ? (string) $row['referred_by_code'] : '' ),
 					isset( $row['user_source'] ) ? $row['user_source'] : '',
-					isset( $row['status'] ) ? $row['status'] : '',
-					isset( $row['remarks'] ) ? $row['remarks'] : '',
 					isset( $row['registered_at'] ) ? $row['registered_at'] : '',
 				)
 			);
@@ -2006,7 +1957,7 @@ final class WPERF_Referral_Auth_System {
 						<thead><tr><th><?php esc_html_e( 'Your Referral’s Name', 'wp-easy-referral' ); ?></th><th><?php esc_html_e( 'Referral\'s Phone Number', 'wp-easy-referral' ); ?></th><th><?php esc_html_e( 'Status', 'wp-easy-referral' ); ?></th></tr></thead>
 						<tbody>
 							<?php foreach ( $children as $child ) : ?>
-								<tr><td><?php echo esc_html( $child['referral_user_name'] ); ?></td><td><?php echo esc_html( $child['referral_user_phone'] ); ?></td><td><?php echo esc_html( $child['status'] ); ?></td></tr>
+								<tr><td><?php echo esc_html( $child['referral_user_name'] ); ?></td><td><?php echo esc_html( $child['referral_user_phone'] ); ?></td><td><?php esc_html_e( 'Unverified', 'wp-easy-referral' ); ?></td></tr>
 							<?php endforeach; ?>
 						</tbody>
 					</table>
@@ -2015,205 +1966,6 @@ final class WPERF_Referral_Auth_System {
 		</div>
 		<?php
 		return (string) ob_get_clean();
-	}
-
-	/**
-	 * Render Lead Desk page for agents.
-	 *
-	 * Shortcode usage:
-	 * [wperf_lead_desk]
-	 *
-	 * @return string
-	 */
-	public function render_lead_desk_page() {
-		if ( ! is_user_logged_in() || ! in_array( 'referral_help_agent', (array) wp_get_current_user()->roles, true ) ) {
-			ob_start();
-			?>
-			<div class="wperf-card wperf-agent-login-wrap" style="max-width:500px;margin:50px auto;">
-				<div style="padding:40px;">
-					<h3 class="wperf-title"><?php esc_html_e( 'Agent Login', 'wp-easy-referral' ); ?></h3>
-					<p class="wperf-copy"><?php esc_html_e( 'Please log in to manage referral leads.', 'wp-easy-referral' ); ?></p>
-					<?php wp_login_form( array( 'redirect' => $this->get_current_request_url() ) ); ?>
-				</div>
-			</div>
-			<?php
-			return ob_get_clean();
-		}
-
-		wp_enqueue_style( 'wperf-auth-system' );
-		wp_enqueue_script( 'wperf-auth-system' );
-
-		global $wpdb;
-		$entries  = $wpdb->get_results( "SELECT * FROM {$this->table_name} ORDER BY referred_by_code ASC, registered_at DESC" );
-		$statuses = array( 'Unverified', 'Verified', 'Contacted', 'Pending', 'Ongoing', 'Converted', 'Rejected' );
-
-		ob_start();
-		?>
-		<div class="wperf-card wperf-lead-desk-card" style="max-width:100%;margin:20px;">
-			<div class="wperf-dashboard" style="padding:30px;">
-				<div class="wperf-dashboard-header" style="justify-content: space-between; align-items:flex-start; margin-bottom: 20px; display:flex;">
-					<div>
-						<h3 class="wperf-title"><?php esc_html_e( 'Lead Desk', 'wp-easy-referral' ); ?></h3>
-						<p class="wperf-copy"><?php esc_html_e( 'Manage referral leads and update their statuses.', 'wp-easy-referral' ); ?></p>
-					</div>
-					<div class="wperf-actions" style="margin-top:0;">
-						<a class="wperf-btn wperf-btn-secondary" href="<?php echo esc_url( wp_logout_url( $this->get_current_request_url() ) ); ?>"><?php esc_html_e( 'Logout', 'wp-easy-referral' ); ?></a>
-					</div>
-				</div>
-
-				<div style="overflow-x:auto;">
-					<table class="wperf-table wperf-lead-table">
-						<thead>
-							<tr>
-								<th><?php esc_html_e( 'Date', 'wp-easy-referral' ); ?></th>
-								<th><?php esc_html_e( 'Name', 'wp-easy-referral' ); ?></th>
-								<th><?php esc_html_e( 'Email', 'wp-easy-referral' ); ?></th>
-								<th><?php esc_html_e( 'Phone', 'wp-easy-referral' ); ?></th>
-								<th><?php esc_html_e( 'Referred By Code', 'wp-easy-referral' ); ?></th>
-								<th><?php esc_html_e( 'Referral User', 'wp-easy-referral' ); ?></th>
-								<th><?php esc_html_e( 'Status', 'wp-easy-referral' ); ?></th>
-								<th><?php esc_html_e( 'Remarks', 'wp-easy-referral' ); ?></th>
-								<th><?php esc_html_e( 'Action', 'wp-easy-referral' ); ?></th>
-							</tr>
-						</thead>
-						<tbody>
-							<?php
-							$last_ref_code = null;
-							$bg_color_alt  = false;
-							if ( empty( $entries ) ) {
-								echo '<tr><td colspan="9">' . esc_html__( 'No entries found.', 'wp-easy-referral' ) . '</td></tr>';
-							}
-							foreach ( $entries as $entry ) {
-								if ( $last_ref_code !== $entry->referred_by_code ) {
-									$bg_color_alt  = ! $bg_color_alt;
-									$last_ref_code = $entry->referred_by_code;
-								}
-								$row_bg = $bg_color_alt ? '#ffffff' : '#f8fafc';
-								?>
-								<tr style="background:<?php echo esc_attr( $row_bg ); ?>;" data-id="<?php echo esc_attr( $entry->id ); ?>">
-									<td style="white-space:nowrap;"><?php echo esc_html( gmdate( 'Y-m-d H:i', strtotime( $entry->registered_at ) ) ); ?></td>
-									<td><?php echo esc_html( $entry->name ); ?></td>
-									<td><?php echo esc_html( $entry->email ); ?></td>
-									<td><?php echo esc_html( $entry->phone ); ?></td>
-									<td><strong><?php echo esc_html( $entry->referred_by_code ); ?></strong></td>
-									<td>
-										<?php echo esc_html( $entry->referral_user_name ); ?><br>
-										<span style="font-size:12px;color:#667085;"><?php echo esc_html( $entry->referral_user_phone ); ?></span>
-									</td>
-									<td>
-										<select class="wperf-lead-status" style="width:120px;padding:6px;border-radius:6px;border:1px solid #d1d5db;font-family:inherit;font-size:14px;">
-											<?php foreach ( $statuses as $status_opt ) : ?>
-												<option value="<?php echo esc_attr( $status_opt ); ?>" <?php selected( $entry->status, $status_opt ); ?>><?php echo esc_html( $status_opt ); ?></option>
-											<?php endforeach; ?>
-										</select>
-									</td>
-									<td>
-										<textarea class="wperf-lead-remarks" rows="2" style="width:200px;padding:6px;border-radius:6px;border:1px solid #d1d5db;font-family:inherit;font-size:13px;resize:vertical;"><?php echo esc_textarea( $entry->remarks ); ?></textarea>
-									</td>
-									<td>
-										<button type="button" class="wperf-btn wperf-btn-save-lead" style="min-height:32px;padding:0 12px;font-size:13px;"><?php esc_html_e( 'Save', 'wp-easy-referral' ); ?></button>
-										<span class="wperf-lead-msg" style="display:block;font-size:12px;color:#059669;margin-top:4px;"></span>
-									</td>
-								</tr>
-								<?php
-							}
-							?>
-						</tbody>
-					</table>
-				</div>
-			</div>
-		</div>
-		<script>
-		document.addEventListener('DOMContentLoaded', function() {
-			var saveBtns = document.querySelectorAll('.wperf-btn-save-lead');
-			saveBtns.forEach(function(btn) {
-				btn.addEventListener('click', function() {
-					var row = btn.closest('tr');
-					var id = row.getAttribute('data-id');
-					var status = row.querySelector('.wperf-lead-status').value;
-					var remarks = row.querySelector('.wperf-lead-remarks').value;
-					var msg = row.querySelector('.wperf-lead-msg');
-
-					btn.disabled = true;
-					btn.innerText = 'Saving...';
-					msg.innerText = '';
-
-					var formData = new FormData();
-					formData.append('action', 'wperf_update_lead');
-					formData.append('id', id);
-					formData.append('status', status);
-					formData.append('remarks', remarks);
-					formData.append('nonce', '<?php echo esc_js( wp_create_nonce( 'wperf_update_lead' ) ); ?>');
-
-					fetch('<?php echo esc_js( admin_url( 'admin-ajax.php' ) ); ?>', {
-						method: 'POST',
-						body: formData
-					})
-					.then(function(res) { return res.json(); })
-					.then(function(data) {
-						btn.disabled = false;
-						btn.innerText = 'Save';
-						if (data.success) {
-							msg.innerText = 'Saved!';
-							msg.style.color = '#059669';
-							setTimeout(function() { msg.innerText = ''; }, 2000);
-						} else {
-							msg.innerText = 'Error!';
-							msg.style.color = '#dc2626';
-						}
-					})
-					.catch(function(err) {
-						btn.disabled = false;
-						btn.innerText = 'Save';
-						msg.innerText = 'Error!';
-						msg.style.color = '#dc2626';
-					});
-				});
-			});
-		});
-		</script>
-		<?php
-		return ob_get_clean();
-	}
-
-	/**
-	 * AJAX logic to update lead status and remarks.
-	 */
-	public function ajax_update_lead() {
-		if ( ! isset( $_POST['nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['nonce'] ) ), 'wperf_update_lead' ) ) {
-			wp_send_json_error( array( 'message' => 'Invalid nonce' ) );
-		}
-		if ( ! is_user_logged_in() || ! in_array( 'referral_help_agent', (array) wp_get_current_user()->roles, true ) ) {
-			if ( ! current_user_can( 'manage_options' ) ) {
-				wp_send_json_error( array( 'message' => 'Unauthorized' ) );
-			}
-		}
-
-		$id      = isset( $_POST['id'] ) ? absint( $_POST['id'] ) : 0;
-		$status  = isset( $_POST['status'] ) ? sanitize_text_field( wp_unslash( $_POST['status'] ) ) : '';
-		$remarks = isset( $_POST['remarks'] ) ? sanitize_textarea_field( wp_unslash( $_POST['remarks'] ) ) : '';
-
-		if ( $id <= 0 ) {
-			wp_send_json_error( array( 'message' => 'Invalid ID' ) );
-		}
-
-		global $wpdb;
-		$updated = $wpdb->update(
-			$this->table_name,
-			array(
-				'status'  => $status,
-				'remarks' => $remarks,
-			),
-			array( 'id' => $id ),
-			array( '%s', '%s' ),
-			array( '%d' )
-		);
-
-		if ( false !== $updated ) {
-			wp_send_json_success( array( 'message' => 'Updated' ) );
-		} else {
-			wp_send_json_error( array( 'message' => 'Database error' ) );
-		}
 	}
 
 	/**
@@ -2391,7 +2143,6 @@ final class WPERF_Referral_Auth_System {
 
 		$output = array();
 		foreach ( $users as $user ) {
-			$status = $wpdb->get_var( $wpdb->prepare( "SELECT status FROM {$this->table_name} WHERE user_id = %d LIMIT 1", $user->ID ) );
 			$output[] = array(
 				'display_name'        => $user->display_name,
 				'user_email'          => $user->user_email,
@@ -2399,14 +2150,12 @@ final class WPERF_Referral_Auth_System {
 				'referral_code'       => (string) get_user_meta( $user->ID, self::META_REFERRAL_ID, true ),
 				'referral_user_name'  => (string) get_user_meta( $user->ID, self::META_REFERRAL_USER_NAME, true ),
 				'referral_user_phone' => (string) get_user_meta( $user->ID, self::META_REFERRAL_USER_PHONE, true ),
-				'status'              => $status ? $status : 'Unverified',
 			);
 		}
 
 		$self_name  = (string) get_user_meta( $user_id, self::META_REFERRAL_USER_NAME, true );
 		$self_phone = (string) get_user_meta( $user_id, self::META_REFERRAL_USER_PHONE, true );
 		if ( '' !== $self_name || '' !== $self_phone ) {
-			$status = $wpdb->get_var( $wpdb->prepare( "SELECT status FROM {$this->table_name} WHERE user_id = %d LIMIT 1", $user_id ) );
 			$output[] = array(
 				'display_name'        => $self_name,
 				'user_email'          => '',
@@ -2414,13 +2163,12 @@ final class WPERF_Referral_Auth_System {
 				'referral_code'       => (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true ),
 				'referral_user_name'  => $self_name,
 				'referral_user_phone' => $self_phone,
-				'status'              => $status ? $status : 'Unverified',
 			);
 		}
 
 		$referral_code = (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true );
 		if ( '' !== $referral_code ) {
-			$rows = $wpdb->get_results( $wpdb->prepare( "SELECT name, email, phone, referral_code, referral_user_name, referral_user_phone, status FROM {$this->table_name} WHERE user_id = 0 AND referred_by_code = %s ORDER BY registered_at DESC", $referral_code ), ARRAY_A );
+			$rows = $wpdb->get_results( $wpdb->prepare( "SELECT name, email, phone, referral_code, referral_user_name, referral_user_phone FROM {$this->table_name} WHERE user_id = 0 AND referred_by_code = %s ORDER BY registered_at DESC", $referral_code ), ARRAY_A );
 			if ( is_array( $rows ) ) {
 				foreach ( $rows as $row ) {
 					$output[] = array(
@@ -2430,7 +2178,6 @@ final class WPERF_Referral_Auth_System {
 						'referral_code'       => isset( $row['referral_code'] ) ? (string) $row['referral_code'] : '',
 						'referral_user_name'  => isset( $row['referral_user_name'] ) ? (string) $row['referral_user_name'] : '',
 						'referral_user_phone' => isset( $row['referral_user_phone'] ) ? (string) $row['referral_user_phone'] : '',
-						'status'              => isset( $row['status'] ) ? (string) $row['status'] : 'Unverified',
 					);
 				}
 			}
