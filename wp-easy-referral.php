@@ -99,6 +99,26 @@ final class WPERF_Referral_Entries_List_Table extends WP_List_Table {
 	}
 
 	/**
+	 * Date column with readable format.
+	 *
+	 * @param object $item Row item.
+	 * @return string
+	 */
+	protected function column_registered_at( $item ) {
+		$raw_date = isset( $item->registered_at ) ? (string) $item->registered_at : '';
+		if ( '' === $raw_date ) {
+			return '';
+		}
+
+		$timestamp = strtotime( $raw_date );
+		if ( false === $timestamp ) {
+			return esc_html( $raw_date );
+		}
+
+		return esc_html( wp_date( 'j F, y \\a\\t g.ia', $timestamp ) );
+	}
+
+	/**
 	 * Default column renderer.
 	 *
 	 * @param object $item        Row item.
@@ -2006,7 +2026,7 @@ final class WPERF_Referral_Auth_System {
 						<thead><tr><th><?php esc_html_e( 'Your Referral’s Name', 'wp-easy-referral' ); ?></th><th><?php esc_html_e( 'Referral\'s Phone Number', 'wp-easy-referral' ); ?></th><th><?php esc_html_e( 'Status', 'wp-easy-referral' ); ?></th></tr></thead>
 						<tbody>
 							<?php foreach ( $children as $child ) : ?>
-								<tr><td><?php echo esc_html( $child['referral_user_name'] ); ?></td><td><?php echo esc_html( $child['referral_user_phone'] ); ?></td><td><?php echo esc_html( $child['status'] ); ?></td></tr>
+								<tr><td><?php echo esc_html( $child['referral_user_name'] ); ?></td><td><?php echo esc_html( $this->mask_lead_phone( $child['referral_user_phone'] ) ); ?></td><td><?php echo esc_html( $child['status'] ); ?></td></tr>
 							<?php endforeach; ?>
 						</tbody>
 					</table>
