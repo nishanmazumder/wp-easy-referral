@@ -343,21 +343,25 @@ final class WPERF_Referral_Auth_System {
 	public static function activate() {
 		global $wpdb;
 
-		add_role(
-			self::ROLE_KEY,
-			self::ROLE_NAME,
-			array(
-				'read' => true,
-			)
-		);
+		if ( ! get_role( self::ROLE_KEY ) ) {
+			add_role(
+				self::ROLE_KEY,
+				self::ROLE_NAME,
+				array(
+					'read' => true,
+				)
+			);
+		}
 
-		add_role(
-			'referral_help_agent',
-			__( 'Referral Help Agent', 'wp-easy-referral' ),
-			array(
-				'read' => true,
-			)
-		);
+		if ( ! get_role( 'referral_help_agent' ) ) {
+			add_role(
+				'referral_help_agent',
+				__( 'Referral Help Agent', 'wp-easy-referral' ),
+				array(
+					'read' => true,
+				)
+			);
+		}
 
 		$settings = get_option( self::OPTION_SETTINGS, array() );
 		if ( ! is_array( $settings ) ) {
@@ -382,7 +386,7 @@ final class WPERF_Referral_Auth_System {
 			source varchar(20) NOT NULL DEFAULT 'manual',
 			user_source varchar(50) NOT NULL DEFAULT '',
 			status varchar(50) NOT NULL DEFAULT 'Unverified',
-			remarks text,
+			remarks text NULL,
 			registered_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY  (id),
 			KEY user_id (user_id),
@@ -1581,9 +1585,11 @@ final class WPERF_Referral_Auth_System {
 				'share_clicks'        => isset( $data['share_clicks'] ) ? absint( $data['share_clicks'] ) : 0,
 				'source'              => isset( $data['source'] ) ? sanitize_key( (string) $data['source'] ) : 'manual',
 				'user_source'         => isset( $data['user_source'] ) ? sanitize_text_field( (string) $data['user_source'] ) : '',
+				'status'              => isset( $data['status'] ) ? sanitize_text_field( (string) $data['status'] ) : 'Unverified',
+				'remarks'             => isset( $data['remarks'] ) ? sanitize_textarea_field( (string) $data['remarks'] ) : '',
 				'registered_at'       => current_time( 'mysql' ),
 			),
-			array( '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s' )
+			array( '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%s' )
 		);
 	}
 
