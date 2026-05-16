@@ -99,6 +99,26 @@ final class WPERF_Referral_Entries_List_Table extends WP_List_Table {
 	}
 
 	/**
+	 * Date column with readable format.
+	 *
+	 * @param object $item Row item.
+	 * @return string
+	 */
+	protected function column_registered_at( $item ) {
+		$raw_date = isset( $item->registered_at ) ? (string) $item->registered_at : '';
+		if ( '' === $raw_date ) {
+			return '';
+		}
+
+		$timestamp = strtotime( $raw_date );
+		if ( false === $timestamp ) {
+			return esc_html( $raw_date );
+		}
+
+		return esc_html( wp_date( 'j F, y \\a\\t g.ia', $timestamp ) );
+	}
+
+	/**
 	 * Default column renderer.
 	 *
 	 * @param object $item        Row item.
@@ -823,11 +843,35 @@ final class WPERF_Referral_Auth_System {
 				<input type="date" id="wperf_start_date" name="start_date" value="<?php echo esc_attr( $start_date ); ?>" />
 				<label for="wperf_end_date"><?php esc_html_e( 'To', 'wp-easy-referral' ); ?></label>
 				<input type="date" id="wperf_end_date" name="end_date" value="<?php echo esc_attr( $end_date ); ?>" />
-				<?php submit_button( __( 'Filter', 'wp-easy-referral' ), 'secondary', '', false ); ?>
-				<a class="button button-primary" href="<?php echo esc_url( $export_url ); ?>"><?php esc_html_e( 'Export CSV', 'wp-easy-referral' ); ?></a>
+				<a class="button button-primary" id="wperf_export_csv_by_date" href="<?php echo esc_url( $export_url ); ?>"><?php esc_html_e( 'Export CSV', 'wp-easy-referral' ); ?></a>
 			</p>
 			<?php $list_table->display(); ?>
 		</form>
+		<script>
+		(function(){
+			var exportLink = document.getElementById('wperf_export_csv_by_date');
+			var startInput = document.getElementById('wperf_start_date');
+			var endInput = document.getElementById('wperf_end_date');
+			if (!exportLink || !startInput || !endInput) {
+				return;
+			}
+			exportLink.addEventListener('click', function(event){
+				event.preventDefault();
+				var url = new URL(exportLink.getAttribute('href'), window.location.origin);
+				if (startInput.value) {
+					url.searchParams.set('start_date', startInput.value);
+				} else {
+					url.searchParams.delete('start_date');
+				}
+				if (endInput.value) {
+					url.searchParams.set('end_date', endInput.value);
+				} else {
+					url.searchParams.delete('end_date');
+				}
+				window.location.href = url.toString();
+			});
+		}());
+		</script>
 		<?php
 	}
 
@@ -1205,14 +1249,37 @@ final class WPERF_Referral_Auth_System {
 				'name'                 => $display_name,
 				'email'                => $email,
 				'phone'                => $phone,
-				'referral_user_name'   => $referral_user_name,
-				'referral_user_phone'  => $referral_user_phone,
+				'referral_user_name'   => '',
+				'referral_user_phone'  => '',
 				'referral_code'        => (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true ),
 				'referred_by_code'     => (string) get_user_meta( $user_id, self::META_REFERRED_BY_CODE, true ),
 				'source'               => '' !== (string) get_user_meta( $user_id, self::META_REFERRED_BY_CODE, true ) ? 'referred' : 'direct',
 				'user_source'          => $user_source,
 			)
 		);
+
+		if ( '' !== $referral_user_name || '' !== $referral_user_phone ) {
+			$referral_owner_code = (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true );
+			$referral_lead_phone = '' !== $referral_user_phone ? $referral_user_phone : '';
+			$referral_exists     = '' !== $referral_lead_phone ? $this->referral_entry_exists_by_phone( $referral_lead_phone, $referral_owner_code ) : false;
+
+			if ( ! $referral_exists ) {
+				$this->insert_registration_entry(
+					array(
+						'user_id'             => 0,
+						'name'                => $referral_user_name,
+						'email'               => '',
+						'phone'               => $referral_lead_phone,
+						'referral_user_name'  => $referral_user_name,
+						'referral_user_phone' => $referral_lead_phone,
+						'referral_code'       => '',
+						'referred_by_code'    => $referral_owner_code,
+						'source'              => 'referred',
+						'user_source'         => $user_source,
+					)
+				);
+			}
+		}
 
 		wp_set_current_user( $user_id );
 		wp_set_auth_cookie( $user_id, true );
@@ -1723,20 +1790,27 @@ final class WPERF_Referral_Auth_System {
 					</p>
 					<p>
 						<label for="wperf_register_password"><?php esc_html_e( 'Password', 'wp-easy-referral' ); ?></label>
-						<input type="password" id="wperf_register_password" name="wperf_password" required />
+						<input type="password" id="wperf_register_password" name="wperf_password" minlength="6" required /><small class="wperf-field-hint"><?php esc_html_e( 'Minimum 6 characters', 'wp-easy-referral' ); ?></small>
 					</p>
-					<div class="wperf-referral-highlight">
-						<div class="wperf-referral-grid">
-							<p>
-								<label for="wperf_referral_user_name"><?php esc_html_e( 'Your Referral Name (optional)', 'wp-easy-referral' ); ?></label>
-								<input type="text" id="wperf_referral_user_name" name="wperf_referral_user_name" value="<?php echo isset( $ref_data['name'] ) ? esc_attr( $ref_data['name'] ) : ''; ?>" />
+							<p class="wperf-referral-toggle">
+								<label for="wperf_wants_to_refer"><?php esc_html_e( 'Do you want to refer someone?', 'wp-easy-referral' ); ?></label>
+								<span class="wperf-checkbox-option">
+									<input type="checkbox" id="wperf_wants_to_refer" name="wperf_wants_to_refer" value="yes" data-wperf-referral-toggle />
+									<span><?php esc_html_e( 'Yes', 'wp-easy-referral' ); ?></span>
+								</span>
 							</p>
-							<p>
-								<label for="wperf_referral_user_phone"><?php esc_html_e( 'Referral\'s Phone Number (optional)', 'wp-easy-referral' ); ?></label>
-								<input type="text" id="wperf_referral_user_phone" name="wperf_referral_user_phone" value="<?php echo isset( $ref_data['phone'] ) ? esc_attr( $ref_data['phone'] ) : ''; ?>" />
-							</p>
-						</div>
-					</div>
+							<div class="wperf-referral-highlight" data-wperf-referral-fields hidden>
+								<div class="wperf-referral-grid">
+									<p>
+										<label for="wperf_referral_user_name"><?php esc_html_e( 'Your Referral Name (optional)', 'wp-easy-referral' ); ?></label>
+										<input type="text" id="wperf_referral_user_name" name="wperf_referral_user_name" value="<?php echo esc_attr( isset( $ref_data['name'] ) ? $ref_data['name'] : '' ); ?>" />
+									</p>
+									<p>
+										<label for="wperf_referral_user_phone"><?php esc_html_e( "Referral's Phone Number (optional)", 'wp-easy-referral' ); ?></label>
+										<input type="text" id="wperf_referral_user_phone" name="wperf_referral_user_phone" value="<?php echo esc_attr( isset( $ref_data['phone'] ) ? $ref_data['phone'] : '' ); ?>" />
+									</p>
+								</div>
+							</div>
 					<input type="hidden" name="wperf_referred_by_code" value="<?php echo esc_attr( $ref_code ); ?>" />
 					<input type="hidden" name="wperf_action" value="register" />
 					<input type="hidden" name="wperf_user_source" value="<?php echo esc_attr( isset( $_GET['source'] ) ? sanitize_text_field( wp_unslash( $_GET['source'] ) ) : '' ); ?>" />
@@ -2006,7 +2080,7 @@ final class WPERF_Referral_Auth_System {
 						<thead><tr><th><?php esc_html_e( 'Your Referral’s Name', 'wp-easy-referral' ); ?></th><th><?php esc_html_e( 'Referral\'s Phone Number', 'wp-easy-referral' ); ?></th><th><?php esc_html_e( 'Status', 'wp-easy-referral' ); ?></th></tr></thead>
 						<tbody>
 							<?php foreach ( $children as $child ) : ?>
-								<tr><td><?php echo esc_html( $child['referral_user_name'] ); ?></td><td><?php echo esc_html( $child['referral_user_phone'] ); ?></td><td><?php echo esc_html( $child['status'] ); ?></td></tr>
+								<tr><td><?php echo esc_html( $child['referral_user_name'] ); ?></td><td><?php echo esc_html( $this->mask_lead_phone( $child['referral_user_phone'] ) ); ?></td><td><?php echo esc_html( $child['status'] ); ?></td></tr>
 							<?php endforeach; ?>
 						</tbody>
 					</table>
@@ -2121,7 +2195,22 @@ final class WPERF_Referral_Auth_System {
 		wp_enqueue_script( 'wperf-auth-system' );
 
 		global $wpdb;
-		$entries  = $wpdb->get_results( "SELECT * FROM {$this->table_name} WHERE referred_by_code = '' AND source = 'direct' ORDER BY registered_at DESC" );
+		$lead_search   = isset( $_GET['wperf_lead_search'] ) ? sanitize_text_field( wp_unslash( $_GET['wperf_lead_search'] ) ) : '';
+		$where_sql     = "WHERE 1=1";
+		$where_values  = array();
+
+		if ( '' === $lead_search ) {
+			$where_sql .= " AND referred_by_code = '' AND source = 'direct'";
+		}
+
+		if ( '' !== $lead_search ) {
+			$like          = '%' . $wpdb->esc_like( $lead_search ) . '%';
+			$where_sql    .= ' AND (name LIKE %s OR email LIKE %s OR phone LIKE %s OR referral_code LIKE %s OR referred_by_code LIKE %s OR referral_user_name LIKE %s OR referral_user_phone LIKE %s)';
+			$where_values = array( $like, $like, $like, $like, $like, $like, $like );
+		}
+
+		$query    = "SELECT * FROM {$this->table_name} {$where_sql} ORDER BY registered_at DESC";
+		$entries  = empty( $where_values ) ? $wpdb->get_results( $query ) : $wpdb->get_results( $wpdb->prepare( $query, $where_values ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 		$statuses = array( 'Unverified', 'Verified', 'Contacted', 'Pending', 'Ongoing', 'Converted', 'Rejected' );
 
 		ob_start();
@@ -2137,6 +2226,13 @@ final class WPERF_Referral_Auth_System {
 						<a class="wperf-btn wperf-btn-secondary" href="<?php echo esc_url( wp_logout_url( $this->get_current_request_url() ) ); ?>"><?php esc_html_e( 'Logout', 'wp-easy-referral' ); ?></a>
 					</div>
 				</div>
+
+				<form class="wperf-lead-search-form" method="get" action="">
+					<p>
+						<input type="search" name="wperf_lead_search" value="<?php echo esc_attr( $lead_search ); ?>" placeholder="<?php esc_attr_e( 'Search leads...', 'wp-easy-referral' ); ?>" />
+						<button type="submit" class="wperf-btn"><?php esc_html_e( 'Search', 'wp-easy-referral' ); ?></button>
+					</p>
+				</form>
 
 				<div style="overflow-x:auto;">
 					<table class="wperf-table wperf-lead-table">
@@ -2529,6 +2625,11 @@ final class WPERF_Referral_Auth_System {
 
 		$output = array();
 		foreach ( $users as $user ) {
+			$wperf_child_phone = $this->normalize_phone( (string) get_user_meta( $user->ID, self::META_PHONE, true ) );
+			if ( in_array( absint( $user->ID ), $wperf_existing_referral_user_ids, true ) || ( '' !== $wperf_child_phone && in_array( $wperf_child_phone, $wperf_existing_referral_phones, true ) ) ) {
+				continue;
+			}
+
 			$status = $wpdb->get_var( $wpdb->prepare( "SELECT status FROM {$this->table_name} WHERE user_id = %d LIMIT 1", $user->ID ) );
 			$output[] = array(
 				'display_name'        => $user->display_name,
@@ -2557,6 +2658,23 @@ final class WPERF_Referral_Auth_System {
 		}
 
 		$referral_code = (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true );
+		global $wpdb;
+		if ( '' !== $referral_code ) {
+			$wperf_existing_rows = $wpdb->get_results( $wpdb->prepare( "SELECT user_id, phone, referral_user_phone FROM {$this->table_name} WHERE referred_by_code = %s", $referral_code ), ARRAY_A );
+			if ( is_array( $wperf_existing_rows ) ) {
+				foreach ( $wperf_existing_rows as $wperf_existing_row ) {
+					if ( ! empty( $wperf_existing_row['user_id'] ) ) {
+						$wperf_existing_referral_user_ids[] = absint( $wperf_existing_row['user_id'] );
+					}
+					if ( ! empty( $wperf_existing_row['phone'] ) ) {
+						$wperf_existing_referral_phones[] = $this->normalize_phone( (string) $wperf_existing_row['phone'] );
+					}
+					if ( ! empty( $wperf_existing_row['referral_user_phone'] ) ) {
+						$wperf_existing_referral_phones[] = $this->normalize_phone( (string) $wperf_existing_row['referral_user_phone'] );
+					}
+				}
+			}
+		}
 		if ( '' !== $referral_code ) {
 			$rows = $wpdb->get_results( $wpdb->prepare( "SELECT name, email, phone, referral_code, referral_user_name, referral_user_phone, status FROM {$this->table_name} WHERE user_id = 0 AND referred_by_code = %s ORDER BY registered_at DESC", $referral_code ), ARRAY_A );
 			if ( is_array( $rows ) ) {
@@ -3221,7 +3339,7 @@ final class WPERF_Referral_Auth_System {
 	 * @return string
 	 */
 	private function get_css() {
-		return '.wperf-card{--wperf-bg:#ffffff;--wperf-text:#111827;--wperf-muted:#667085;--wperf-border:#e5e7eb;--wperf-primary:#111827;--wperf-shadow:0 20px 50px rgba(2,6,23,.08);max-width:920px;margin:0 auto;background:var(--wperf-bg);border:1px solid var(--wperf-border);border-radius:18px;box-shadow:var(--wperf-shadow);overflow:hidden}.wperf-tab-nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px;background:#f3f4f6;border-bottom:1px solid var(--wperf-border)}.wperf-tab-btn{border:0;border-radius:12px;background:transparent;color:#374151;font-size:15px;font-weight:600;padding:14px 18px;cursor:pointer}.wperf-tab-btn.is-active{background:#fff;color:#111827;box-shadow:0 4px 14px rgba(0,0,0,.06)}.wperf-tab-panel{display:none;padding:28px}.wperf-tab-panel.is-active{display:block}.wperf-title{margin:0 0 8px;font-size:28px;line-height:1.15;font-weight:700;color:var(--wperf-text)}.wperf-subtitle{margin:28px 0 14px;font-size:18px;font-weight:700;color:var(--wperf-text)}.wperf-copy{margin:0 0 24px;color:var(--wperf-muted);font-size:15px;line-height:1.65}.wperf-phone-login-form p,.wperf-register-form p{margin:0 0 18px}.wperf-phone-login-form label,.wperf-register-form label{display:block;margin:0 0 8px;font-size:14px;font-weight:600;color:var(--wperf-text)}.wperf-phone-login-form input[type=text],.wperf-phone-login-form input[type=email],.wperf-phone-login-form input[type=password],.wperf-register-form input[type=text],.wperf-register-form input[type=email],.wperf-register-form input[type=password]{width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box}.wperf-referral-highlight{background:#f8fafc;border:1px solid #dbe4ee;border-radius:14px;padding:16px 16px 0;margin:0 0 20px}.wperf-referral-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.wperf-btn{display:inline-flex!important;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:0 20px;border:0;border-radius:12px;font-size:15px;font-weight:700;text-decoration:none;cursor:pointer;background:var(--wperf-primary)!important;color:#fff!important}.wperf-btn-google{background:#fff!important;color:#111827!important;border:1px solid #d1d5db!important;width:100%;margin-top:12px}.wperf-google-icon{display:inline-flex;align-items:center}.wperf-btn-secondary{background:#fff!important;color:#111827!important;border:1px solid var(--wperf-border)!important}.wperf-actions,.wperf-share-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:18px}.wperf-logged-in,.wperf-dashboard{padding:30px}.wperf-notice{padding:14px 16px;border-radius:12px;font-size:14px;margin-bottom:18px}.wperf-notice-warning{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412}.wperf-notice-error{padding:0;margin:-6px 0 14px;border:0;background:transparent;color:#dc2626;font-size:12px;line-height:1.5}.wperf-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px}.wperf-stat-box{padding:18px;border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb}.wperf-stat-label{font-size:13px;color:#667085;margin-bottom:8px}.wperf-stat-value{font-size:22px;font-weight:700;color:#111827;word-break:break-word}.wperf-small{font-size:16px}.wperf-share-card-link{text-decoration:none}.wperf-share-card{position:relative;overflow:hidden;min-height:370px;border-radius:0;padding:26px;display:flex;align-items:flex-end;color:#fff;margin-top:10px}.wperf-share-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(17,24,39,.08),rgba(17,24,39,.58))}.wperf-share-content{position:relative;z-index:2}.wperf-share-kicker{font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.9}.wperf-share-name{margin:10px 0 8px;font-size:30px;color:#fff}.wperf-share-code{display:inline-block;padding:10px 14px;border-radius:999px;background:rgba(255,255,255,.12);backdrop-filter:blur(6px);font-weight:700}.wperf-share-message{margin:16px 0 0;font-size:18px;max-width:420px;color:#fff}.wperf-share-link-box,.wperf-profile-extra{margin-top:16px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:12px;background:#fff}.wperf-table{width:100%;border-collapse:collapse}.wperf-table th,.wperf-table td{padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:left;font-size:14px}.wperf-brochure-modal[hidden]{display:none!important}.wperf-brochure-modal{position:fixed;inset:0;z-index:99999;background:rgba(17,24,39,.72);padding:24px;display:flex;align-items:center;justify-content:center}.wperf-brochure-dialog{position:relative;width:min(960px,100%);max-height:90vh;background:#fff;border-radius:16px;padding:20px 20px 16px;box-sizing:border-box;display:flex;flex-direction:column;gap:14px}.wperf-brochure-close{position:absolute;top:10px;right:12px;border:0;background:transparent;font-size:28px;line-height:1;cursor:pointer;color:#111827}.wperf-brochure-frame-wrap{margin-top:22px}.wperf-brochure-frame{width:100%;height:min(70vh,720px);border:1px solid #e5e7eb;border-radius:10px;background:#fff}.wperf-brochure-footer{display:flex;justify-content:flex-end}.wperf-shared-banner-image{display:block;width:100%;height:auto;max-height:none;border-radius:0}.wperf-shared-banner-image-mobile{display:none}.wperf-add-referral-modal[hidden]{display:none!important}.wperf-add-referral-modal{position:fixed;inset:0;z-index:99999;background:rgba(17,24,39,.72);padding:24px;display:flex;align-items:center;justify-content:center}.wperf-virtual-page{padding:30px 16px; width: 100%}@media (max-width:767px){.wperf-tab-panel,.wperf-logged-in,.wperf-dashboard{padding:20px}.wperf-title{font-size:24px}.wperf-stats,.wperf-referral-grid{grid-template-columns:1fr}.wperf-shared-banner-image-desktop{display:none!important}.wperf-shared-banner-image-mobile{display:block!important}}';
+		return '.wperf-card{--wperf-bg:#ffffff;--wperf-text:#111827;--wperf-muted:#667085;--wperf-border:#e5e7eb;--wperf-primary:#111827;--wperf-shadow:0 20px 50px rgba(2,6,23,.08);max-width:920px;margin:0 auto;background:var(--wperf-bg);border:1px solid var(--wperf-border);border-radius:18px;box-shadow:var(--wperf-shadow);overflow:hidden}.wperf-tab-nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px;background:#f3f4f6;border-bottom:1px solid var(--wperf-border)}.wperf-tab-btn{border:0;border-radius:12px;background:transparent;color:#374151;font-size:15px;font-weight:600;padding:14px 18px;cursor:pointer}.wperf-tab-btn.is-active{background:#fff;color:#111827;box-shadow:0 4px 14px rgba(0,0,0,.06)}.wperf-tab-panel{display:none;padding:28px}.wperf-tab-panel.is-active{display:block}.wperf-title{margin:0 0 8px;font-size:28px;line-height:1.15;font-weight:700;color:var(--wperf-text)}.wperf-subtitle{margin:28px 0 14px;font-size:18px;font-weight:700;color:var(--wperf-text)}.wperf-copy{margin:0 0 24px;color:var(--wperf-muted);font-size:15px;line-height:1.65}.wperf-phone-login-form p,.wperf-register-form p{margin:0 0 18px}.wperf-phone-login-form label,.wperf-register-form label{display:block;margin:0 0 8px;font-size:14px;font-weight:600;color:var(--wperf-text)}.wperf-phone-login-form input[type=text],.wperf-phone-login-form input[type=email],.wperf-phone-login-form input[type=password],.wperf-register-form input[type=text],.wperf-register-form input[type=email],.wperf-register-form input[type=password]{width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box}.wperf-referral-highlight{background:#f8fafc;border:1px solid #dbe4ee;border-radius:14px;padding:16px 16px 0;margin:0 0 20px}.wperf-referral-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.wperf-btn{display:inline-flex!important;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:0 20px;border:0;border-radius:12px;font-size:15px;font-weight:700;text-decoration:none;cursor:pointer;background:var(--wperf-primary)!important;color:#fff!important}.wperf-btn-google{background:#fff!important;color:#111827!important;border:1px solid #d1d5db!important;width:100%;margin-top:12px}.wperf-google-icon{display:inline-flex;align-items:center}.wperf-btn-secondary{background:#fff!important;color:#111827!important;border:1px solid var(--wperf-border)!important}.wperf-actions,.wperf-share-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:18px}.wperf-logged-in,.wperf-dashboard{padding:30px}.wperf-notice{padding:14px 16px;border-radius:12px;font-size:14px;margin-bottom:18px}.wperf-notice-warning{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412}.wperf-notice-error{padding:0;margin:-6px 0 14px;border:0;background:transparent;color:#dc2626;font-size:12px;line-height:1.5}.wperf-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px}.wperf-stat-box{padding:18px;border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb}.wperf-stat-label{font-size:13px;color:#667085;margin-bottom:8px}.wperf-stat-value{font-size:22px;font-weight:700;color:#111827;word-break:break-word}.wperf-small{font-size:16px}.wperf-share-card-link{text-decoration:none}.wperf-share-card{position:relative;overflow:hidden;min-height:370px;border-radius:0;padding:26px;display:flex;align-items:flex-end;color:#fff;margin-top:10px}.wperf-share-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(17,24,39,.08),rgba(17,24,39,.58))}.wperf-share-content{position:relative;z-index:2}.wperf-share-kicker{font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.9}.wperf-share-name{margin:10px 0 8px;font-size:30px;color:#fff}.wperf-share-code{display:inline-block;padding:10px 14px;border-radius:999px;background:rgba(255,255,255,.12);backdrop-filter:blur(6px);font-weight:700}.wperf-share-message{margin:16px 0 0;font-size:18px;max-width:420px;color:#fff}.wperf-share-link-box,.wperf-profile-extra{margin-top:16px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:12px;background:#fff}.wperf-table{width:100%;border-collapse:collapse}.wperf-table th,.wperf-table td{padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:left;font-size:14px}.wperf-brochure-modal[hidden]{display:none!important}.wperf-brochure-modal{position:fixed;inset:0;z-index:99999;background:rgba(17,24,39,.72);padding:24px;display:flex;align-items:center;justify-content:center}.wperf-brochure-dialog{position:relative;width:min(960px,100%);max-height:90vh;background:#fff;border-radius:16px;padding:20px 20px 16px;box-sizing:border-box;display:flex;flex-direction:column;gap:14px}.wperf-brochure-close{position:absolute;top:10px;right:12px;border:0;background:transparent;font-size:28px;line-height:1;cursor:pointer;color:#111827}.wperf-brochure-frame-wrap{margin-top:22px}.wperf-brochure-frame{width:100%;height:min(70vh,720px);border:1px solid #e5e7eb;border-radius:10px;background:#fff}.wperf-brochure-footer{display:flex;justify-content:flex-end}.wperf-shared-banner-image{display:block;width:100%;height:auto;max-height:none;border-radius:0}.wperf-shared-banner-image-mobile{display:none}.wperf-add-referral-modal[hidden]{display:none!important}.wperf-add-referral-modal{position:fixed;inset:0;z-index:99999;background:rgba(17,24,39,.72);padding:24px;display:flex;align-items:center;justify-content:center}.wperf-lead-search-form{margin:0 0 18px}.wperf-lead-search-form p{display:flex;gap:10px;align-items:center}.wperf-lead-search-form input[type=search]{width:min(360px,100%);height:42px;padding:0 12px;border:1px solid #d1d5db;border-radius:10px}.wperf-field-hint{display:block;margin-top:6px;color:#6b7280;font-size:13px}.wperf-checkbox-option{display:inline-flex!important;align-items:center;gap:8px;margin-top:8px;font-weight:400}.wperf-checkbox-option span{color:var(--wperf-text)}.wperf-checkbox-option input[type=checkbox]{display:inline-block!important;appearance:auto!important;-webkit-appearance:checkbox!important;width:16px!important;height:16px!important;margin:0!important;opacity:1!important;position:static!important;visibility:visible!important}.wperf-virtual-page{padding:30px 16px; width: 100%}@media (max-width:767px){.wperf-tab-panel,.wperf-logged-in,.wperf-dashboard{padding:20px}.wperf-title{font-size:24px}.wperf-stats,.wperf-referral-grid{grid-template-columns:1fr}.wperf-shared-banner-image-desktop{display:none!important}.wperf-shared-banner-image-mobile{display:block!important}}';
 	}
 
 	/**
@@ -3250,7 +3368,19 @@ document.addEventListener('DOMContentLoaded', function () {
 					activateTab(button.getAttribute('data-tab-target'));
 				});
 			});
+		
+	var referralToggleInputs = document.querySelectorAll('[data-wperf-referral-toggle]');
+	referralToggleInputs.forEach(function (input) {
+		input.addEventListener('change', function () {
+			var form = input.closest('form') || document;
+			var fields = form.querySelector('[data-wperf-referral-fields]');
+			if (!fields) {
+				return;
+			}
+			fields.hidden = !input.checked;
 		});
+	});
+});
 	}
 
 	var brochureModal = document.querySelector('.wperf-brochure-modal[data-wperf-global-modal]');
