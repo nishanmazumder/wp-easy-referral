@@ -2611,6 +2611,8 @@ final class WPERF_Referral_Auth_System {
 	 * @return array
 	 */
 	private function get_direct_referrals( $user_id ) {
+		$wperf_existing_referral_phones = array();
+		$wperf_existing_referral_user_ids = array();
 		global $wpdb;
 
 		$users = get_users(
@@ -2626,7 +2628,7 @@ final class WPERF_Referral_Auth_System {
 		$output = array();
 		foreach ( $users as $user ) {
 			$wperf_child_phone = $this->normalize_phone( (string) get_user_meta( $user->ID, self::META_PHONE, true ) );
-			if ( in_array( absint( $user->ID ), $wperf_existing_referral_user_ids, true ) || ( '' !== $wperf_child_phone && in_array( $wperf_child_phone, $wperf_existing_referral_phones, true ) ) ) {
+			if ( in_array( absint( $user->ID ), is_array( $wperf_existing_referral_user_ids ) ? $wperf_existing_referral_user_ids : array(), true ) || ( '' !== $wperf_child_phone && in_array( $wperf_child_phone, is_array( $wperf_existing_referral_phones ) ? $wperf_existing_referral_phones : array(), true ) ) ) {
 				continue;
 			}
 
