@@ -2543,23 +2543,11 @@ final class WPERF_Referral_Auth_System {
 			return;
 		}
 
-		$settings  = $this->get_settings();
-		$share_url = $this->get_share_page_url( (string) $share_code );
-		$image_url = ! empty( $settings['share_bg_url'] ) ? (string) $settings['share_bg_url'] : '';
-		if ( '' === $image_url && ! empty( $settings['shared_banner_bg_url'] ) ) {
-			$image_url = (string) $settings['shared_banner_bg_url'];
-		}
-		if ( '' !== $image_url && 0 === strpos( $image_url, '//' ) ) {
-			$image_url = ( is_ssl() ? 'https:' : 'http:' ) . $image_url;
-		}
-		if ( '' !== $image_url && ! preg_match( '#^https?://#i', $image_url ) ) {
-			$image_url = home_url( '/' . ltrim( $image_url, '/' ) );
-		}
-		if ( '' !== $image_url ) {
-			$image_url = set_url_scheme( esc_url_raw( $image_url ), 'https' );
-		}
-		$title = ! empty( $settings['facebook_share_title'] ) ? (string) $settings['facebook_share_title'] : __( 'Unlock Special Offers on bti homes', 'wp-easy-referral' );
-		$desc  = (string) $settings['share_message'];
+		$settings   = $this->get_settings();
+		$share_url  = $this->get_share_page_url( (string) $share_code );
+		$image_url  = (string) $settings['share_bg_url'];
+		$title      = ! empty( $settings['facebook_share_title'] ) ? (string) $settings['facebook_share_title'] : __( 'Unlock Special Offers on bti homes', 'wp-easy-referral' );
+		$desc       = (string) $settings['share_message'];
 
 		echo "\n";
 		echo '<meta property="og:type" content="website" />' . "\n";
@@ -2568,32 +2556,7 @@ final class WPERF_Referral_Auth_System {
 		echo '<meta property="og:url" content="' . esc_url( $share_url ) . '" />' . "\n";
 		if ( '' !== $image_url ) {
 			echo '<meta property="og:image" content="' . esc_url( $image_url ) . '" />' . "\n";
-			echo '<meta property="og:image:secure_url" content="' . esc_url( $image_url ) . '" />' . "\n";
-			echo '<meta property="og:image:type" content="' . esc_attr( $this->get_og_image_type( $image_url ) ) . '" />' . "\n";
-			echo '<meta property="og:image:width" content="1200" />' . "\n";
-			echo '<meta property="og:image:height" content="630" />' . "\n";
 		}
-	}
-
-	/**
-	 * Get Open Graph image type from URL extension.
-	 *
-	 * @param string $image_url Image URL.
-	 * @return string
-	 */
-	private function get_og_image_type( $image_url ) {
-		$path = wp_parse_url( (string) $image_url, PHP_URL_PATH );
-		$ext  = strtolower( pathinfo( (string) $path, PATHINFO_EXTENSION ) );
-
-		if ( 'png' === $ext ) {
-			return 'image/png';
-		}
-
-		if ( 'webp' === $ext ) {
-			return 'image/webp';
-		}
-
-		return 'image/jpeg';
 	}
 
 	/**
