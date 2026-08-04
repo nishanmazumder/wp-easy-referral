@@ -167,7 +167,8 @@ final class WPERF_Referral_Entries_List_Table extends WP_List_Table {
 				),
 				admin_url( 'admin.php' )
 			),
-			'wperf_delete_entries'
+			'wperf_delete_entries',
+			'wperf_delete_nonce'
 		);
 
 		$actions = array(
@@ -319,6 +320,8 @@ final class WPERF_Referral_Auth_System {
 		add_shortcode( 'wperf_lead_desk', array( $this, 'render_lead_desk_page' ) );
 
 		add_action( 'wp_ajax_wperf_update_lead', array( $this, 'ajax_update_lead' ) );
+		add_action( 'wp_ajax_wperf_check_phone', array( $this, 'ajax_check_phone' ) );
+		add_action( 'wp_ajax_nopriv_wperf_check_phone', array( $this, 'ajax_check_phone' ) );
 
 		add_action( 'wp_enqueue_scripts', array( $this, 'register_assets' ) );
 		add_action( 'admin_menu', array( $this, 'register_admin_menus' ) );
@@ -742,7 +745,14 @@ final class WPERF_Referral_Auth_System {
 			return;
 		}
 
-		if ( ! isset( $_REQUEST['wperf_delete_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_REQUEST['wperf_delete_nonce'] ) ), 'wperf_delete_entries' ) ) {
+		$delete_nonce = '';
+		if ( isset( $_REQUEST['wperf_delete_nonce'] ) ) {
+			$delete_nonce = sanitize_text_field( wp_unslash( $_REQUEST['wperf_delete_nonce'] ) );
+		} elseif ( isset( $_REQUEST['_wpnonce'] ) ) {
+			$delete_nonce = sanitize_text_field( wp_unslash( $_REQUEST['_wpnonce'] ) );
+		}
+
+		if ( '' === $delete_nonce || ! wp_verify_nonce( $delete_nonce, 'wperf_delete_entries' ) ) {
 			return;
 		}
 
@@ -954,7 +964,7 @@ final class WPERF_Referral_Auth_System {
 			$where_values[] = $end_date;
 		}
 
-		$query = "SELECT * FROM {$this->table_name} {$where_sql} ORDER BY registered_at DESC, id DESC";
+		$query = "SELECT * FROM {$this->table_name} {$where_sql} ORDER BY registered_at ASC, id ASC";
 		$rows  = empty( $where_values ) ? $wpdb->get_results( $query, ARRAY_A ) : $wpdb->get_results( $wpdb->prepare( $query, $where_values ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 
 		nocache_headers();
@@ -984,7 +994,10 @@ final class WPERF_Referral_Auth_System {
 				'Status',
 				'Remarks',
 				'Registered At',
-			)
+			),
+			',',
+			'"',
+			''
 		);
 
 		foreach ( $rows as $row ) {
@@ -1006,7 +1019,10 @@ final class WPERF_Referral_Auth_System {
 					isset( $row['status'] ) ? $row['status'] : '',
 					isset( $row['remarks'] ) ? $row['remarks'] : '',
 					isset( $row['registered_at'] ) ? $row['registered_at'] : '',
-				)
+				),
+				',',
+				'"',
+				''
 			);
 		}
 
@@ -1112,6 +1128,7 @@ final class WPERF_Referral_Auth_System {
 		$form_context        = isset( $_POST['wperf_form_context'] ) ? sanitize_key( wp_unslash( $_POST['wperf_form_context'] ) ) : 'default';
 		$user_source         = isset( $_POST['wperf_user_source'] ) ? sanitize_text_field( wp_unslash( $_POST['wperf_user_source'] ) ) : '';
 		$terms_consent       = isset( $_POST['wperf_terms_consent'] ) ? absint( wp_unslash( $_POST['wperf_terms_consent'] ) ) : 0;
+		$wants_to_refer      = isset( $_POST['wperf_wants_to_refer'] ) && 'yes' === sanitize_key( wp_unslash( $_POST['wperf_wants_to_refer'] ) );
 
 		if ( '' === $display_name || '' === $phone ) {
 			$this->safe_redirect_with_notice( 'register', 'missing_fields' );
@@ -1121,13 +1138,18 @@ final class WPERF_Referral_Auth_System {
 			$this->safe_redirect_with_notice( 'register', 'phone_required' );
 		}
 
-		if ( '' !== $referral_user_phone ) {
-			if ( $referral_user_phone === $phone || $this->phone_exists_anywhere( $referral_user_phone ) ) {
+		if ( 'default' === $form_context ) {
+			if ( ! $wants_to_refer ) {
+				$referral_user_name  = '';
+				$referral_user_phone = '';
+			} elseif ( '' === $referral_user_phone ) {
+				$this->safe_redirect_with_notice( 'register', 'referral_phone_required' );
+			} elseif ( $referral_user_phone === $phone || $this->phone_exists_anywhere( $referral_user_phone ) ) {
 				$this->safe_redirect_with_notice( 'register', 'phone_exists' );
 			}
 		}
 
-		if ( '' === $referred_by_code ) {
+		if ( '' === $referred_by_code && 'default' !== $form_context ) {
 			$referred_by_code = $this->maybe_get_referral_code_from_manual_fields( $referral_user_name, $referral_user_phone );
 		}
 
@@ -1270,7 +1292,7 @@ final class WPERF_Referral_Auth_System {
 			)
 		);
 
-		if ( '' !== $referral_user_name || '' !== $referral_user_phone ) {
+		if ( $wants_to_refer && '' !== $referral_user_phone ) {
 			$referral_owner_code = (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true );
 			$referral_lead_phone = '' !== $referral_user_phone ? $referral_user_phone : '';
 			$referral_exists     = '' !== $referral_lead_phone ? $this->referral_entry_exists_by_phone( $referral_lead_phone, $referral_owner_code ) : false;
@@ -1569,6 +1591,38 @@ final class WPERF_Referral_Auth_System {
 	}
 
 	/**
+	 * Check whether a referral user already has the phone number.
+	 *
+	 * @param string $phone Phone number.
+	 * @return bool
+	 */
+	private function referral_user_exists_by_phone( $phone ) {
+		$candidates = $this->get_phone_lookup_candidates( $phone );
+		if ( empty( $candidates ) ) {
+			return false;
+		}
+
+		foreach ( $candidates as $candidate ) {
+			$users = get_users(
+				array(
+					'role'        => self::ROLE_KEY,
+					'number'      => 1,
+					'count_total' => false,
+					'fields'      => 'ids',
+					'meta_key'    => self::META_PHONE,
+					'meta_value'  => $candidate,
+				)
+			);
+
+			if ( ! empty( $users ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
 	 * Check if phone exists in users or referral entries.
 	 *
 	 * @param string $phone Phone number.
@@ -1582,7 +1636,7 @@ final class WPERF_Referral_Auth_System {
 			return false;
 		}
 
-		if ( $this->get_user_by_phone( $phone ) instanceof WP_User ) {
+		if ( $this->referral_user_exists_by_phone( $phone ) ) {
 			return true;
 		}
 
@@ -1816,7 +1870,7 @@ final class WPERF_Referral_Auth_System {
 				<?php if ( '' !== $notice_code && 'register' === $active_tab ) : ?>
 					<div class="wperf-notice wperf-notice-error"><?php echo esc_html( $this->get_notice_message( $notice_code ) ); ?></div>
 				<?php endif; ?>
-				<form class="wperf-register-form" method="post" action="" style="margin-top:24px;">
+				<form class="wperf-register-form" method="post" action="" style="margin-top:24px;" data-wperf-phone-check-form data-wperf-phone-check-url="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>" data-wperf-account-phone="#wperf_register_phone">
 <p>
 						<label for="wperf_display_name"><?php esc_html_e( 'Name', 'wp-easy-referral' ); ?></label>
 						<input type="text" id="wperf_display_name" name="wperf_display_name" required />
@@ -1843,12 +1897,13 @@ final class WPERF_Referral_Auth_System {
 							<div class="wperf-referral-highlight" data-wperf-referral-fields hidden>
 								<div class="wperf-referral-grid">
 									<p>
-										<label for="wperf_referral_user_name"><?php esc_html_e( 'Your Referral Name (optional)', 'wp-easy-referral' ); ?></label>
-										<input type="text" id="wperf_referral_user_name" name="wperf_referral_user_name" value="<?php echo esc_attr( isset( $ref_data['name'] ) ? $ref_data['name'] : '' ); ?>" />
+										<label for="wperf_referral_user_name"><?php esc_html_e( 'Referral User Name (optional)', 'wp-easy-referral' ); ?></label>
+										<input type="text" id="wperf_referral_user_name" name="wperf_referral_user_name" value="" />
 									</p>
 									<p>
-										<label for="wperf_referral_user_phone"><?php esc_html_e( "Referral's Phone Number (optional)", 'wp-easy-referral' ); ?></label>
-										<input type="text" id="wperf_referral_user_phone" name="wperf_referral_user_phone" value="<?php echo esc_attr( isset( $ref_data['phone'] ) ? $ref_data['phone'] : '' ); ?>" />
+										<label for="wperf_referral_user_phone"><?php esc_html_e( "Referral's Phone Number", 'wp-easy-referral' ); ?></label>
+										<input type="text" id="wperf_referral_user_phone" name="wperf_referral_user_phone" value="" data-wperf-phone-check />
+										<small class="wperf-field-error" data-wperf-phone-error aria-live="polite"></small>
 									</p>
 								</div>
 							</div>
@@ -1856,6 +1911,7 @@ final class WPERF_Referral_Auth_System {
 					<input type="hidden" name="wperf_action" value="register" />
 					<input type="hidden" name="wperf_user_source" value="<?php echo esc_attr( $this->get_current_user_source() ); ?>" />
 					<?php wp_nonce_field( 'wperf_front_register', 'wperf_register_nonce' ); ?>
+					<?php wp_nonce_field( 'wperf_phone_check', 'wperf_phone_check_nonce', false ); ?>
 					<div class="wperf-consent-field">
 								<input type="checkbox" id="wperf_terms_consent" class="wperf-terms-checkbox" name="wperf_terms_consent" value="1" required />
 								<label class="wperf-consent-label" for="wperf_terms_consent">
@@ -2105,14 +2161,15 @@ final class WPERF_Referral_Auth_System {
 				<div class="wperf-add-referral-modal" hidden>
 					<div class="wperf-brochure-dialog">
 						<button type="button" class="wperf-brochure-close" data-wperf-close-add-referral aria-label="<?php esc_attr_e( 'Close add referral form', 'wp-easy-referral' ); ?>">×</button>
-						<form class="wperf-register-form" method="post" action="">
+						<form class="wperf-register-form" method="post" action="" data-wperf-phone-check-form data-wperf-phone-check-url="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>">
 							<p>
 								<label for="wperf_add_referral_name"><?php esc_html_e( 'Name', 'wp-easy-referral' ); ?></label>
 								<input type="text" id="wperf_add_referral_name" name="wperf_display_name" required placeholder="<?php esc_attr_e( 'Name', 'wp-easy-referral' ); ?>" style="display:block;width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box;background:#fff;color:#111827;" />
 							</p>
 							<p>
 								<label for="wperf_add_referral_phone"><?php esc_html_e( 'Mobile Number', 'wp-easy-referral' ); ?></label>
-								<input type="text" id="wperf_add_referral_phone" name="wperf_phone" required placeholder="<?php esc_attr_e( 'Phone', 'wp-easy-referral' ); ?>" style="display:block;width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box;background:#fff;color:#111827;" />
+								<input type="text" id="wperf_add_referral_phone" name="wperf_phone" required placeholder="<?php esc_attr_e( 'Phone', 'wp-easy-referral' ); ?>" data-wperf-phone-check style="display:block;width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box;background:#fff;color:#111827;" />
+								<small class="wperf-field-error" data-wperf-phone-error aria-live="polite"></small>
 							</p>
 							<input type="hidden" name="wperf_referral_user_name" value="" />
 							<input type="hidden" name="wperf_referral_user_phone" value="" />
@@ -2121,6 +2178,7 @@ final class WPERF_Referral_Auth_System {
 							<input type="hidden" name="wperf_action" value="register" />
 							<input type="hidden" name="wperf_user_source" value="<?php echo esc_attr( $this->get_current_user_source() ); ?>" />
 							<?php wp_nonce_field( 'wperf_front_register', 'wperf_register_nonce' ); ?>
+							<?php wp_nonce_field( 'wperf_phone_check', 'wperf_phone_check_nonce', false ); ?>
 							<p><button type="submit" class="wperf-btn"><?php esc_html_e( 'Save Referral User', 'wp-easy-referral' ); ?></button></p>
 						</form>
 					</div>
@@ -2329,7 +2387,7 @@ final class WPERF_Referral_Auth_System {
 										</select>
 									</td>
 									<td>
-										<textarea class="wperf-lead-remarks" rows="2" style="width:220px;padding:6px;border-radius:6px;border:1px solid #d1d5db;font-family:inherit;font-size:13px;resize:vertical;"><?php echo esc_textarea( $entry->remarks ); ?></textarea>
+										<textarea class="wperf-lead-remarks" rows="2" style="width:220px;padding:6px;border-radius:6px;border:1px solid #d1d5db;font-family:inherit;font-size:13px;resize:vertical;"><?php echo esc_textarea( (string) $entry->remarks ); ?></textarea>
 									</td>
 									<td>
 										<button type="button" class="wperf-btn wperf-btn-save-lead" style="min-height:32px;padding:0 12px;font-size:13px;"><?php esc_html_e( 'Update', 'wp-easy-referral' ); ?></button>
@@ -2377,7 +2435,7 @@ final class WPERF_Referral_Auth_System {
 																	</select>
 																</td>
 																<td>
-																	<textarea class="wperf-lead-remarks" rows="2" style="width:220px;padding:6px;border-radius:6px;border:1px solid #d1d5db;font-family:inherit;font-size:13px;resize:vertical;"><?php echo esc_textarea( $child->remarks ); ?></textarea>
+																	<textarea class="wperf-lead-remarks" rows="2" style="width:220px;padding:6px;border-radius:6px;border:1px solid #d1d5db;font-family:inherit;font-size:13px;resize:vertical;"><?php echo esc_textarea( (string) $child->remarks ); ?></textarea>
 																</td>
 																<td>
 																	<button type="button" class="wperf-btn wperf-btn-save-lead" style="min-height:32px;padding:0 12px;font-size:13px;"><?php esc_html_e( 'Update', 'wp-easy-referral' ); ?></button>
@@ -2462,6 +2520,38 @@ final class WPERF_Referral_Auth_System {
 		</script>
 		<?php
 		return ob_get_clean();
+	}
+
+	/**
+	 * Check a referral phone number through AJAX.
+	 *
+	 * @return void
+	 */
+	public function ajax_check_phone() {
+		$nonce = isset( $_POST['nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['nonce'] ) ) : '';
+		if ( '' === $nonce || ! wp_verify_nonce( $nonce, 'wperf_phone_check' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Invalid request. Please refresh and try again.', 'wp-easy-referral' ) ) );
+		}
+
+		$phone = isset( $_POST['phone'] ) ? $this->normalize_phone( wp_unslash( $_POST['phone'] ) ) : '';
+		if ( '' === $phone ) {
+			wp_send_json_success(
+				array(
+					'valid'   => false,
+					'exists'  => false,
+					'message' => __( 'Please enter a valid Bangladeshi mobile number.', 'wp-easy-referral' ),
+				)
+			);
+		}
+
+		$exists = $this->phone_exists_anywhere( $phone );
+		wp_send_json_success(
+			array(
+				'valid'   => true,
+				'exists'  => $exists,
+				'message' => $exists ? __( 'This mobile number is already registered.', 'wp-easy-referral' ) : '',
+			)
+		);
 	}
 
 	/**
@@ -2719,11 +2809,12 @@ final class WPERF_Referral_Auth_System {
 	 * @return array
 	 */
 	private function get_direct_referrals( $user_id ) {
-		$wperf_existing_referral_phones = array();
-		$wperf_existing_referral_user_ids = array();
 		global $wpdb;
 
-		$users = get_users(
+		$output       = array();
+		$seen_phones  = array();
+		$seen_user_ids = array();
+		$users        = get_users(
 			array(
 				'role'       => self::ROLE_KEY,
 				'meta_key'   => self::META_REFERRED_BY_USER_ID,
@@ -2733,71 +2824,65 @@ final class WPERF_Referral_Auth_System {
 			)
 		);
 
-		$output = array();
 		foreach ( $users as $user ) {
-			$wperf_child_phone = $this->normalize_phone( (string) get_user_meta( $user->ID, self::META_PHONE, true ) );
-			if ( in_array( absint( $user->ID ), is_array( $wperf_existing_referral_user_ids ) ? $wperf_existing_referral_user_ids : array(), true ) || ( '' !== $wperf_child_phone && in_array( $wperf_child_phone, is_array( $wperf_existing_referral_phones ) ? $wperf_existing_referral_phones : array(), true ) ) ) {
+			$child_user_id = absint( $user->ID );
+			$child_phone   = $this->normalize_phone( (string) get_user_meta( $child_user_id, self::META_PHONE, true ) );
+
+			if ( in_array( $child_user_id, $seen_user_ids, true ) || ( '' !== $child_phone && in_array( $child_phone, $seen_phones, true ) ) ) {
 				continue;
 			}
 
-			$status = $wpdb->get_var( $wpdb->prepare( "SELECT status FROM {$this->table_name} WHERE user_id = %d LIMIT 1", $user->ID ) );
+			$status   = $wpdb->get_var( $wpdb->prepare( "SELECT status FROM {$this->table_name} WHERE user_id = %d ORDER BY id ASC LIMIT 1", $child_user_id ) );
 			$output[] = array(
 				'display_name'        => $user->display_name,
 				'user_email'          => $user->user_email,
-				'phone'               => (string) get_user_meta( $user->ID, self::META_PHONE, true ),
-				'referral_code'       => (string) get_user_meta( $user->ID, self::META_REFERRAL_ID, true ),
-				'referral_user_name'  => (string) get_user_meta( $user->ID, self::META_REFERRAL_USER_NAME, true ),
-				'referral_user_phone' => (string) get_user_meta( $user->ID, self::META_REFERRAL_USER_PHONE, true ),
+				'phone'               => $child_phone,
+				'referral_code'       => (string) get_user_meta( $child_user_id, self::META_REFERRAL_ID, true ),
+				'referral_user_name'  => $user->display_name,
+				'referral_user_phone' => $child_phone,
 				'status'              => $status ? $status : 'Unverified',
 			);
-		}
 
-		$self_name  = (string) get_user_meta( $user_id, self::META_REFERRAL_USER_NAME, true );
-		$self_phone = (string) get_user_meta( $user_id, self::META_REFERRAL_USER_PHONE, true );
-		if ( '' !== $self_name || '' !== $self_phone ) {
-			$status = $wpdb->get_var( $wpdb->prepare( "SELECT status FROM {$this->table_name} WHERE user_id = %d LIMIT 1", $user_id ) );
-			$output[] = array(
-				'display_name'        => $self_name,
-				'user_email'          => '',
-				'phone'               => '',
-				'referral_code'       => (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true ),
-				'referral_user_name'  => $self_name,
-				'referral_user_phone' => $self_phone,
-				'status'              => $status ? $status : 'Unverified',
-			);
+			$seen_user_ids[] = $child_user_id;
+			if ( '' !== $child_phone ) {
+				$seen_phones[] = $child_phone;
+			}
 		}
 
 		$referral_code = (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true );
-		global $wpdb;
 		if ( '' !== $referral_code ) {
-			$wperf_existing_rows = $wpdb->get_results( $wpdb->prepare( "SELECT user_id, phone, referral_user_phone FROM {$this->table_name} WHERE referred_by_code = %s", $referral_code ), ARRAY_A );
-			if ( is_array( $wperf_existing_rows ) ) {
-				foreach ( $wperf_existing_rows as $wperf_existing_row ) {
-					if ( ! empty( $wperf_existing_row['user_id'] ) ) {
-						$wperf_existing_referral_user_ids[] = absint( $wperf_existing_row['user_id'] );
-					}
-					if ( ! empty( $wperf_existing_row['phone'] ) ) {
-						$wperf_existing_referral_phones[] = $this->normalize_phone( (string) $wperf_existing_row['phone'] );
-					}
-					if ( ! empty( $wperf_existing_row['referral_user_phone'] ) ) {
-						$wperf_existing_referral_phones[] = $this->normalize_phone( (string) $wperf_existing_row['referral_user_phone'] );
-					}
-				}
-			}
-		}
-		if ( '' !== $referral_code ) {
-			$rows = $wpdb->get_results( $wpdb->prepare( "SELECT name, email, phone, referral_code, referral_user_name, referral_user_phone, status FROM {$this->table_name} WHERE user_id = 0 AND referred_by_code = %s ORDER BY registered_at DESC", $referral_code ), ARRAY_A );
+			$rows = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT name, email, phone, referral_code, referral_user_name, referral_user_phone, status FROM {$this->table_name} WHERE user_id = 0 AND referred_by_code = %s ORDER BY registered_at DESC, id DESC",
+					$referral_code
+				),
+				ARRAY_A
+			);
+
 			if ( is_array( $rows ) ) {
 				foreach ( $rows as $row ) {
+					$row_phone = $this->normalize_phone(
+						! empty( $row['phone'] ) ? (string) $row['phone'] : ( isset( $row['referral_user_phone'] ) ? (string) $row['referral_user_phone'] : '' )
+					);
+
+					if ( '' !== $row_phone && in_array( $row_phone, $seen_phones, true ) ) {
+						continue;
+					}
+
+					$row_name = ! empty( $row['name'] ) ? (string) $row['name'] : ( isset( $row['referral_user_name'] ) ? (string) $row['referral_user_name'] : '' );
 					$output[] = array(
-						'display_name'        => isset( $row['name'] ) ? (string) $row['name'] : '',
+						'display_name'        => $row_name,
 						'user_email'          => isset( $row['email'] ) ? (string) $row['email'] : '',
-						'phone'               => isset( $row['phone'] ) ? (string) $row['phone'] : '',
+						'phone'               => $row_phone,
 						'referral_code'       => isset( $row['referral_code'] ) ? (string) $row['referral_code'] : '',
-						'referral_user_name'  => isset( $row['referral_user_name'] ) ? (string) $row['referral_user_name'] : '',
-						'referral_user_phone' => isset( $row['referral_user_phone'] ) ? (string) $row['referral_user_phone'] : '',
+						'referral_user_name'  => $row_name,
+						'referral_user_phone' => $row_phone,
 						'status'              => isset( $row['status'] ) ? (string) $row['status'] : 'Unverified',
 					);
+
+					if ( '' !== $row_phone ) {
+						$seen_phones[] = $row_phone;
+					}
 				}
 			}
 		}
@@ -3274,6 +3359,7 @@ final class WPERF_Referral_Auth_System {
 			'invalid_request'       => __( 'Invalid request. Please try again.', 'wp-easy-referral' ),
 			'missing_fields'        => __( 'Please complete all required fields.', 'wp-easy-referral' ),
 			'phone_required'        => __( 'Mobile number is required.', 'wp-easy-referral' ),
+			'referral_phone_required' => __( 'Referral phone number is required when you choose to refer someone.', 'wp-easy-referral' ),
 			'invalid_login'         => __( 'Invalid mobile number or password.', 'wp-easy-referral' ),
 			'invalid_email'         => __( 'Please provide a valid email address.', 'wp-easy-referral' ),
 			'weak_password'         => __( 'Password must be at least 6 characters.', 'wp-easy-referral' ),
@@ -3449,7 +3535,7 @@ final class WPERF_Referral_Auth_System {
 	 * @return string
 	 */
 	private function get_css() {
-		return '.wperf-card{--wperf-bg:#ffffff;--wperf-text:#111827;--wperf-muted:#667085;--wperf-border:#e5e7eb;--wperf-primary:#111827;--wperf-shadow:0 20px 50px rgba(2,6,23,.08);max-width:920px;margin:0 auto;background:var(--wperf-bg);border:1px solid var(--wperf-border);border-radius:18px;box-shadow:var(--wperf-shadow);overflow:hidden}.wperf-tab-nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px;background:#f3f4f6;border-bottom:1px solid var(--wperf-border)}.wperf-tab-btn{border:0;border-radius:12px;background:transparent;color:#374151;font-size:15px;font-weight:600;padding:14px 18px;cursor:pointer}.wperf-tab-btn.is-active{background:#fff;color:#111827;box-shadow:0 4px 14px rgba(0,0,0,.06)}.wperf-tab-panel{display:none;padding:28px}.wperf-tab-panel.is-active{display:block}.wperf-title{margin:0 0 8px;font-size:28px;line-height:1.15;font-weight:700;color:var(--wperf-text)}.wperf-subtitle{margin:28px 0 14px;font-size:18px;font-weight:700;color:var(--wperf-text)}.wperf-copy{margin:0 0 24px;color:var(--wperf-muted);font-size:15px;line-height:1.65}.wperf-phone-login-form p,.wperf-register-form p{margin:0 0 18px}.wperf-phone-login-form label,.wperf-register-form label{display:block;margin:0 0 8px;font-size:14px;font-weight:600;color:var(--wperf-text)}.wperf-phone-login-form input[type=text],.wperf-phone-login-form input[type=email],.wperf-phone-login-form input[type=password],.wperf-register-form input[type=text],.wperf-register-form input[type=email],.wperf-register-form input[type=password]{width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box}.wperf-referral-highlight{background:#f8fafc;border:1px solid #dbe4ee;border-radius:14px;padding:16px 16px 0;margin:0 0 20px}.wperf-referral-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.wperf-btn{display:inline-flex!important;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:0 20px;border:0;border-radius:12px;font-size:15px;font-weight:700;text-decoration:none;cursor:pointer;background:var(--wperf-primary)!important;color:#fff!important}.wperf-btn-google{background:#fff!important;color:#111827!important;border:1px solid #d1d5db!important;width:100%;margin-top:12px}.wperf-google-icon{display:inline-flex;align-items:center}.wperf-btn-secondary{background:#fff!important;color:#111827!important;border:1px solid var(--wperf-border)!important}.wperf-actions,.wperf-share-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:18px}.wperf-logged-in,.wperf-dashboard{padding:30px}.wperf-notice{padding:14px 16px;border-radius:12px;font-size:14px;margin-bottom:18px}.wperf-notice-warning{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412}.wperf-notice-error{padding:0;margin:-6px 0 14px;border:0;background:transparent;color:#dc2626;font-size:12px;line-height:1.5}.wperf-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px}.wperf-stat-box{padding:18px;border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb}.wperf-stat-label{font-size:13px;color:#667085;margin-bottom:8px}.wperf-stat-value{font-size:22px;font-weight:700;color:#111827;word-break:break-word}.wperf-small{font-size:16px}.wperf-share-card-link{text-decoration:none}.wperf-share-card{position:relative;overflow:hidden;min-height:370px;border-radius:0;padding:26px;display:flex;align-items:flex-end;color:#fff;margin-top:10px}.wperf-share-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(17,24,39,.08),rgba(17,24,39,.58))}.wperf-share-content{position:relative;z-index:2}.wperf-share-kicker{font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.9}.wperf-share-name{margin:10px 0 8px;font-size:30px;color:#fff}.wperf-share-code{display:inline-block;padding:10px 14px;border-radius:999px;background:rgba(255,255,255,.12);backdrop-filter:blur(6px);font-weight:700}.wperf-share-message{margin:16px 0 0;font-size:18px;max-width:420px;color:#fff}.wperf-consent-field{display:flex!important;align-items:flex-start;gap:10px;margin:14px 0}.wperf-terms-checkbox{display:inline-block!important;appearance:auto!important;-webkit-appearance:checkbox!important;width:18px!important;height:18px!important;min-width:18px!important;margin:3px 0 0!important;opacity:1!important;visibility:visible!important;position:static!important;clip:auto!important;pointer-events:auto!important}.wperf-consent-label{display:inline!important;font-weight:400;line-height:1.5;margin:0}.wperf-consent-label a{text-decoration:underline}.wperf-share-link-box,.wperf-profile-extra{margin-top:16px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:12px;background:#fff}.wperf-table{width:100%;border-collapse:collapse}.wperf-table th,.wperf-table td{padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:left;font-size:14px}.wperf-brochure-modal[hidden]{display:none!important}.wperf-brochure-modal{position:fixed;inset:0;z-index:99999;background:rgba(17,24,39,.72);padding:24px;display:flex;align-items:center;justify-content:center}.wperf-brochure-dialog{position:relative;width:min(960px,100%);max-height:90vh;background:#fff;border-radius:16px;padding:20px 20px 16px;box-sizing:border-box;display:flex;flex-direction:column;gap:14px}.wperf-brochure-close{position:absolute;top:10px;right:12px;border:0;background:transparent;font-size:28px;line-height:1;cursor:pointer;color:#111827}.wperf-brochure-frame-wrap{margin-top:22px}.wperf-brochure-frame{width:100%;height:min(70vh,720px);border:1px solid #e5e7eb;border-radius:10px;background:#fff}.wperf-brochure-footer{display:flex;justify-content:flex-end}.wperf-shared-banner-image{display:block;width:100%;height:auto;max-height:none;border-radius:0}.wperf-shared-banner-image-mobile{display:none}.wperf-add-referral-modal[hidden]{display:none!important}.wperf-add-referral-modal{position:fixed;inset:0;z-index:99999;background:rgba(17,24,39,.72);padding:24px;display:flex;align-items:center;justify-content:center}.wperf-lead-search-form{margin:0 0 18px}.wperf-lead-search-form p{display:flex;gap:10px;align-items:center}.wperf-lead-search-form input[type=search]{width:min(360px,100%);height:42px;padding:0 12px;border:1px solid #d1d5db;border-radius:10px}.wperf-field-hint{display:block;margin-top:6px;color:#6b7280;font-size:13px}.wperf-checkbox-option{display:inline-flex!important;align-items:center;gap:8px;margin-top:8px;font-weight:400}.wperf-checkbox-option span{color:var(--wperf-text)}.wperf-checkbox-option input[type=checkbox]{display:inline-block!important;appearance:auto!important;-webkit-appearance:checkbox!important;width:16px!important;height:16px!important;margin:0!important;opacity:1!important;position:static!important;visibility:visible!important}.wperf-share-link-box{display:block}.wperf-copy-link-row{display:flex;gap:8px;align-items:center;margin-top:8px}.wperf-copy-link-input{flex:1;width:100%;height:42px;border:1px solid #d1d5db;border-radius:8px;padding:0 12px;background:#fff;color:#111827;box-sizing:border-box}.wperf-copy-link-btn{border:0!important;border-radius:8px!important;padding:10px 16px!important;background:#000!important;color:#fff!important;cursor:pointer!important;font-weight:700!important;line-height:1!important}.wperf-copy-link-btn:hover,.wperf-copy-link-btn:focus{background:#111!important;color:#fff!important}.wperf-copy-feedback{display:inline-block;margin-top:6px;font-style:normal;font-size:12px;font-weight:700;color:#047857}.wperf-virtual-page{padding:30px 16px; width: 100%}@media (max-width:767px){.wperf-tab-panel,.wperf-logged-in,.wperf-dashboard{padding:20px}.wperf-title{font-size:24px}.wperf-stats,.wperf-referral-grid{grid-template-columns:1fr}.wperf-shared-banner-image-desktop{display:none!important}.wperf-shared-banner-image-mobile{display:block!important}}';
+		return '.wperf-card{--wperf-bg:#ffffff;--wperf-text:#111827;--wperf-muted:#667085;--wperf-border:#e5e7eb;--wperf-primary:#111827;--wperf-shadow:0 20px 50px rgba(2,6,23,.08);max-width:920px;margin:0 auto;background:var(--wperf-bg);border:1px solid var(--wperf-border);border-radius:18px;box-shadow:var(--wperf-shadow);overflow:hidden}.wperf-tab-nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px;background:#f3f4f6;border-bottom:1px solid var(--wperf-border)}.wperf-tab-btn{border:0;border-radius:12px;background:transparent;color:#374151;font-size:15px;font-weight:600;padding:14px 18px;cursor:pointer}.wperf-tab-btn.is-active{background:#fff;color:#111827;box-shadow:0 4px 14px rgba(0,0,0,.06)}.wperf-tab-panel{display:none;padding:28px}.wperf-tab-panel.is-active{display:block}.wperf-title{margin:0 0 8px;font-size:28px;line-height:1.15;font-weight:700;color:var(--wperf-text)}.wperf-subtitle{margin:28px 0 14px;font-size:18px;font-weight:700;color:var(--wperf-text)}.wperf-copy{margin:0 0 24px;color:var(--wperf-muted);font-size:15px;line-height:1.65}.wperf-phone-login-form p,.wperf-register-form p{margin:0 0 18px}.wperf-phone-login-form label,.wperf-register-form label{display:block;margin:0 0 8px;font-size:14px;font-weight:600;color:var(--wperf-text)}.wperf-phone-login-form input[type=text],.wperf-phone-login-form input[type=email],.wperf-phone-login-form input[type=password],.wperf-register-form input[type=text],.wperf-register-form input[type=email],.wperf-register-form input[type=password]{width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box}.wperf-referral-highlight{background:#f8fafc;border:1px solid #dbe4ee;border-radius:14px;padding:16px 16px 0;margin:0 0 20px}.wperf-referral-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.wperf-btn{display:inline-flex!important;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:0 20px;border:0;border-radius:12px;font-size:15px;font-weight:700;text-decoration:none;cursor:pointer;background:var(--wperf-primary)!important;color:#fff!important}.wperf-btn-google{background:#fff!important;color:#111827!important;border:1px solid #d1d5db!important;width:100%;margin-top:12px}.wperf-google-icon{display:inline-flex;align-items:center}.wperf-btn-secondary{background:#fff!important;color:#111827!important;border:1px solid var(--wperf-border)!important}.wperf-actions,.wperf-share-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:18px}.wperf-logged-in,.wperf-dashboard{padding:30px}.wperf-notice{padding:14px 16px;border-radius:12px;font-size:14px;margin-bottom:18px}.wperf-notice-warning{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412}.wperf-notice-error{padding:0;margin:-6px 0 14px;border:0;background:transparent;color:#dc2626;font-size:12px;line-height:1.5}.wperf-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px}.wperf-stat-box{padding:18px;border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb}.wperf-stat-label{font-size:13px;color:#667085;margin-bottom:8px}.wperf-stat-value{font-size:22px;font-weight:700;color:#111827;word-break:break-word}.wperf-small{font-size:16px}.wperf-share-card-link{text-decoration:none}.wperf-share-card{position:relative;overflow:hidden;min-height:370px;border-radius:0;padding:26px;display:flex;align-items:flex-end;color:#fff;margin-top:10px}.wperf-share-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(17,24,39,.08),rgba(17,24,39,.58))}.wperf-share-content{position:relative;z-index:2}.wperf-share-kicker{font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.9}.wperf-share-name{margin:10px 0 8px;font-size:30px;color:#fff}.wperf-share-code{display:inline-block;padding:10px 14px;border-radius:999px;background:rgba(255,255,255,.12);backdrop-filter:blur(6px);font-weight:700}.wperf-share-message{margin:16px 0 0;font-size:18px;max-width:420px;color:#fff}.wperf-consent-field{display:flex!important;align-items:flex-start;gap:10px;margin:14px 0}.wperf-terms-checkbox{display:inline-block!important;appearance:auto!important;-webkit-appearance:checkbox!important;width:18px!important;height:18px!important;min-width:18px!important;margin:3px 0 0!important;opacity:1!important;visibility:visible!important;position:static!important;clip:auto!important;pointer-events:auto!important}.wperf-consent-label{display:inline!important;font-weight:400;line-height:1.5;margin:0}.wperf-consent-label a{text-decoration:underline}.wperf-share-link-box,.wperf-profile-extra{margin-top:16px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:12px;background:#fff}.wperf-table{width:100%;border-collapse:collapse}.wperf-table th,.wperf-table td{padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:left;font-size:14px}.wperf-brochure-modal[hidden]{display:none!important}.wperf-brochure-modal{position:fixed;inset:0;z-index:99999;background:rgba(17,24,39,.72);padding:24px;display:flex;align-items:center;justify-content:center}.wperf-brochure-dialog{position:relative;width:min(960px,100%);max-height:90vh;background:#fff;border-radius:16px;padding:20px 20px 16px;box-sizing:border-box;display:flex;flex-direction:column;gap:14px}.wperf-brochure-close{position:absolute;top:10px;right:12px;border:0;background:transparent;font-size:28px;line-height:1;cursor:pointer;color:#111827}.wperf-brochure-frame-wrap{margin-top:22px}.wperf-brochure-frame{width:100%;height:min(70vh,720px);border:1px solid #e5e7eb;border-radius:10px;background:#fff}.wperf-brochure-footer{display:flex;justify-content:flex-end}.wperf-shared-banner-image{display:block;width:100%;height:auto;max-height:none;border-radius:0}.wperf-shared-banner-image-mobile{display:none}.wperf-add-referral-modal[hidden]{display:none!important}.wperf-add-referral-modal{position:fixed;inset:0;z-index:99999;background:rgba(17,24,39,.72);padding:24px;display:flex;align-items:center;justify-content:center}.wperf-lead-search-form{margin:0 0 18px}.wperf-lead-search-form p{display:flex;gap:10px;align-items:center}.wperf-lead-search-form input[type=search]{width:min(360px,100%);height:42px;padding:0 12px;border:1px solid #d1d5db;border-radius:10px}.wperf-field-hint{display:block;margin-top:6px;color:#6b7280;font-size:13px}.wperf-field-error{display:block;min-height:18px;margin-top:5px;color:#dc2626;font-size:12px;line-height:1.4}.wperf-checkbox-option{display:inline-flex!important;align-items:center;gap:8px;margin-top:8px;font-weight:400}.wperf-checkbox-option span{color:var(--wperf-text)}.wperf-checkbox-option input[type=checkbox]{display:inline-block!important;appearance:auto!important;-webkit-appearance:checkbox!important;width:16px!important;height:16px!important;margin:0!important;opacity:1!important;position:static!important;visibility:visible!important}.wperf-share-link-box{display:block}.wperf-copy-link-row{display:flex;gap:8px;align-items:center;margin-top:8px}.wperf-copy-link-input{flex:1;width:100%;height:42px;border:1px solid #d1d5db;border-radius:8px;padding:0 12px;background:#fff;color:#111827;box-sizing:border-box}.wperf-copy-link-btn{border:0!important;border-radius:8px!important;padding:10px 16px!important;background:#000!important;color:#fff!important;cursor:pointer!important;font-weight:700!important;line-height:1!important}.wperf-copy-link-btn:hover,.wperf-copy-link-btn:focus{background:#111!important;color:#fff!important}.wperf-copy-feedback{display:inline-block;margin-top:6px;font-style:normal;font-size:12px;font-weight:700;color:#047857}.wperf-virtual-page{padding:30px 16px; width: 100%}@media (max-width:767px){.wperf-tab-panel,.wperf-logged-in,.wperf-dashboard{padding:20px}.wperf-title{font-size:24px}.wperf-stats,.wperf-referral-grid{grid-template-columns:1fr}.wperf-shared-banner-image-desktop{display:none!important}.wperf-shared-banner-image-mobile{display:block!important}}';
 	}
 
 	/**
@@ -3461,33 +3547,174 @@ final class WPERF_Referral_Auth_System {
 		return <<<'JS'
 document.addEventListener('DOMContentLoaded', function () {
 	var wrappers = document.querySelectorAll('[data-wperf-tabs]');
-	if (wrappers.length) {
-		wrappers.forEach(function (wrapper) {
-			var buttons = wrapper.querySelectorAll('.wperf-tab-btn');
-			var panels = wrapper.querySelectorAll('.wperf-tab-panel');
-			function activateTab(target) {
-				buttons.forEach(function (button) {
-					button.classList.toggle('is-active', button.getAttribute('data-tab-target') === target);
-				});
-				panels.forEach(function (panel) {
-					panel.classList.toggle('is-active', panel.id === 'wperf-panel-' + target);
-				});
-			}
+	wrappers.forEach(function (wrapper) {
+		var buttons = wrapper.querySelectorAll('.wperf-tab-btn');
+		var panels = wrapper.querySelectorAll('.wperf-tab-panel');
+
+		function activateTab(target) {
 			buttons.forEach(function (button) {
-				button.addEventListener('click', function () {
-					activateTab(button.getAttribute('data-tab-target'));
-				});
+				button.classList.toggle('is-active', button.getAttribute('data-tab-target') === target);
 			});
-		
-	var referralToggleInputs = document.querySelectorAll('[data-wperf-referral-toggle]');
-	referralToggleInputs.forEach(function (input) {
-		input.addEventListener('change', function () {
-			var form = input.closest('form') || document;
-			var fields = form.querySelector('[data-wperf-referral-fields]');
+			panels.forEach(function (panel) {
+				panel.classList.toggle('is-active', panel.id === 'wperf-panel-' + target);
+			});
+		}
+
+		buttons.forEach(function (button) {
+			button.addEventListener('click', function () {
+				activateTab(button.getAttribute('data-tab-target'));
+			});
+		});
+	});
+
+	function normalizePhone(value) {
+		var phone = String(value || '').replace(/[^0-9+]/g, '').replace(/^\+/, '');
+		if (phone.indexOf('880') === 0) {
+			phone = phone.substring(3);
+		}
+		if (phone.length === 10 && phone.charAt(0) === '1') {
+			phone = '0' + phone;
+		}
+		return phone.length === 11 && phone.charAt(0) === '0' ? phone : '';
+	}
+
+	function setPhoneError(input, message) {
+		var form = input.closest('form');
+		var error = form ? form.querySelector('[data-wperf-phone-error]') : null;
+		if (error) {
+			error.textContent = message || '';
+		}
+		input.setAttribute('aria-invalid', message ? 'true' : 'false');
+		input.dataset.wperfPhoneInvalid = message ? '1' : '0';
+	}
+
+	function checkPhone(form, input) {
+		var toggle = form.querySelector('[data-wperf-referral-toggle]');
+		if (toggle && !toggle.checked) {
+			setPhoneError(input, '');
+			return Promise.resolve(true);
+		}
+
+		var phone = normalizePhone(input.value);
+		if (!phone) {
+			setPhoneError(input, 'Please enter a valid Bangladeshi mobile number.');
+			return Promise.resolve(false);
+		}
+
+		var accountSelector = form.getAttribute('data-wperf-account-phone');
+		var accountInput = accountSelector ? form.querySelector(accountSelector) : null;
+		if (accountInput && normalizePhone(accountInput.value) === phone) {
+			setPhoneError(input, 'The referral phone number cannot be your own mobile number.');
+			return Promise.resolve(false);
+		}
+
+		var endpoint = form.getAttribute('data-wperf-phone-check-url');
+		var nonceInput = form.querySelector('[name="wperf_phone_check_nonce"]');
+		if (!endpoint || !nonceInput) {
+			setPhoneError(input, 'Unable to verify this phone number. Please refresh the page.');
+			return Promise.resolve(false);
+		}
+
+		var data = new FormData();
+		data.append('action', 'wperf_check_phone');
+		data.append('phone', phone);
+		data.append('nonce', nonceInput.value);
+		input.dataset.wperfPhoneChecking = '1';
+
+		return fetch(endpoint, { method: 'POST', body: data, credentials: 'same-origin' })
+			.then(function (response) { return response.json(); })
+			.then(function (result) {
+				input.dataset.wperfPhoneChecking = '0';
+				if (!result.success || !result.data) {
+					setPhoneError(input, result.data && result.data.message ? result.data.message : 'Unable to verify this phone number.');
+					return false;
+				}
+				if (!result.data.valid || result.data.exists) {
+					setPhoneError(input, result.data.message || 'This mobile number is already registered.');
+					return false;
+				}
+				setPhoneError(input, '');
+				return true;
+			})
+			.catch(function () {
+				input.dataset.wperfPhoneChecking = '0';
+				setPhoneError(input, 'Unable to verify this phone number. Please try again.');
+				return false;
+			});
+	}
+
+	document.querySelectorAll('[data-wperf-referral-toggle]').forEach(function (input) {
+		var form = input.closest('form');
+		var fields = form ? form.querySelector('[data-wperf-referral-fields]') : null;
+		var referralPhone = fields ? fields.querySelector('[data-wperf-phone-check]') : null;
+
+		function updateReferralFields() {
 			if (!fields) {
 				return;
 			}
 			fields.hidden = !input.checked;
+			if (referralPhone) {
+				referralPhone.required = input.checked;
+				if (!input.checked) {
+					referralPhone.value = '';
+					setPhoneError(referralPhone, '');
+				}
+			}
+		}
+
+		input.addEventListener('change', updateReferralFields);
+		updateReferralFields();
+	});
+
+	document.querySelectorAll('[data-wperf-phone-check-form]').forEach(function (form) {
+		var input = form.querySelector('[data-wperf-phone-check]');
+		if (!input) {
+			return;
+		}
+
+		var timer = null;
+		input.addEventListener('input', function () {
+			setPhoneError(input, '');
+			window.clearTimeout(timer);
+			var toggle = form.querySelector('[data-wperf-referral-toggle]');
+			if (toggle && !toggle.checked) {
+				return;
+			}
+			if (normalizePhone(input.value)) {
+				timer = window.setTimeout(function () {
+					checkPhone(form, input);
+				}, 350);
+			}
+		});
+
+		input.addEventListener('blur', function () {
+			var toggle = form.querySelector('[data-wperf-referral-toggle]');
+			if ((!toggle || toggle.checked) && input.value.trim()) {
+				checkPhone(form, input);
+			}
+		});
+
+		form.addEventListener('submit', function (event) {
+			if (form.dataset.wperfSubmitting === '1') {
+				return;
+			}
+			var toggle = form.querySelector('[data-wperf-referral-toggle]');
+			if (toggle && !toggle.checked) {
+				return;
+			}
+
+			event.preventDefault();
+			checkPhone(form, input).then(function (valid) {
+				if (!valid) {
+					input.focus();
+					return;
+				}
+				form.dataset.wperfSubmitting = '1';
+				HTMLFormElement.prototype.submit.call(form);
+			});
+		});
+	});
+
 	document.addEventListener('click', function (event) {
 		var button = event.target.closest('.wperf-copy-link-btn');
 		if (!button) {
@@ -3495,12 +3722,8 @@ document.addEventListener('DOMContentLoaded', function () {
 		}
 
 		var box = button.closest('.wperf-share-link-box');
-		if (!box) {
-			return;
-		}
-
-		var input = box.querySelector('.wperf-copy-link-input');
-		var feedback = box.querySelector('.wperf-copy-feedback');
+		var input = box ? box.querySelector('.wperf-copy-link-input') : null;
+		var feedback = box ? box.querySelector('.wperf-copy-feedback') : null;
 		if (!input) {
 			return;
 		}
@@ -3512,9 +3735,7 @@ document.addEventListener('DOMContentLoaded', function () {
 		var done = function () {
 			if (feedback) {
 				feedback.textContent = 'Copied';
-				window.setTimeout(function () {
-					feedback.textContent = '';
-				}, 1600);
+				window.setTimeout(function () { feedback.textContent = ''; }, 1600);
 			}
 		};
 
@@ -3528,10 +3749,6 @@ document.addEventListener('DOMContentLoaded', function () {
 			done();
 		}
 	});
-});
-	});
-});
-	}
 
 	var brochureModal = document.querySelector('.wperf-brochure-modal[data-wperf-global-modal]');
 	if (!brochureModal) {
@@ -3543,8 +3760,7 @@ document.addEventListener('DOMContentLoaded', function () {
 		document.body.appendChild(brochureModal);
 	}
 
-	var brochureButtons = document.querySelectorAll('[data-wperf-brochure-open]');
-	brochureButtons.forEach(function (button) {
+	document.querySelectorAll('[data-wperf-brochure-open]').forEach(function (button) {
 		button.addEventListener('click', function () {
 			var url = button.getAttribute('data-wperf-brochure-open') || '';
 			var frame = brochureModal.querySelector('.wperf-brochure-frame');
@@ -3576,26 +3792,21 @@ document.addEventListener('DOMContentLoaded', function () {
 	});
 
 	var addReferralModal = document.querySelector('.wperf-add-referral-modal');
-	var openAddReferralButtons = document.querySelectorAll('[data-wperf-open-add-referral]');
-	var closeAddReferralButtons = document.querySelectorAll('[data-wperf-close-add-referral]');
-
-	openAddReferralButtons.forEach(function (button) {
+	document.querySelectorAll('[data-wperf-open-add-referral]').forEach(function (button) {
 		button.addEventListener('click', function () {
-			if (!addReferralModal) {
-				return;
+			if (addReferralModal) {
+				addReferralModal.hidden = false;
+				document.body.style.overflow = 'hidden';
 			}
-			addReferralModal.hidden = false;
-			document.body.style.overflow = 'hidden';
 		});
 	});
 
-	closeAddReferralButtons.forEach(function (button) {
+	document.querySelectorAll('[data-wperf-close-add-referral]').forEach(function (button) {
 		button.addEventListener('click', function () {
-			if (!addReferralModal) {
-				return;
+			if (addReferralModal) {
+				addReferralModal.hidden = true;
+				document.body.style.overflow = '';
 			}
-			addReferralModal.hidden = true;
-			document.body.style.overflow = '';
 		});
 	});
 
