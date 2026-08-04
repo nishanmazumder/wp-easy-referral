@@ -1144,8 +1144,8 @@ final class WPERF_Referral_Auth_System {
 				$referral_user_phone = '';
 			} elseif ( '' === $referral_user_phone ) {
 				$this->safe_redirect_with_notice( 'register', 'referral_phone_required' );
-			} elseif ( $referral_user_phone === $phone || $this->phone_exists_anywhere( $referral_user_phone ) ) {
-				$this->safe_redirect_with_notice( 'register', 'phone_exists' );
+			} elseif ( $referral_user_phone === $phone ) {
+				$this->safe_redirect_with_notice( 'register', 'referral_phone_matches' );
 			}
 		}
 
@@ -1294,25 +1294,22 @@ final class WPERF_Referral_Auth_System {
 
 		if ( $wants_to_refer && '' !== $referral_user_phone ) {
 			$referral_owner_code = (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true );
-			$referral_lead_phone = '' !== $referral_user_phone ? $referral_user_phone : '';
-			$referral_exists     = '' !== $referral_lead_phone ? $this->referral_entry_exists_by_phone( $referral_lead_phone, $referral_owner_code ) : false;
+			$referral_lead_phone = $referral_user_phone;
 
-			if ( ! $referral_exists ) {
-				$this->insert_registration_entry(
-					array(
-						'user_id'             => 0,
-						'name'                => $referral_user_name,
-						'email'               => '',
-						'phone'               => $referral_lead_phone,
-						'referral_user_name'  => $referral_user_name,
-						'referral_user_phone' => $referral_lead_phone,
-						'referral_code'       => '',
-						'referred_by_code'    => $referral_owner_code,
-						'source'              => 'referred',
-						'user_source'         => $user_source,
-					)
-				);
-			}
+			$this->insert_registration_entry(
+				array(
+					'user_id'             => 0,
+					'name'                => $referral_user_name,
+					'email'               => '',
+					'phone'               => $referral_lead_phone,
+					'referral_user_name'  => $referral_user_name,
+					'referral_user_phone' => $referral_lead_phone,
+					'referral_code'       => '',
+					'referred_by_code'    => $referral_owner_code,
+					'source'              => 'referred',
+					'user_source'         => $user_source,
+				)
+			);
 		}
 
 		wp_set_current_user( $user_id );
@@ -1870,7 +1867,7 @@ final class WPERF_Referral_Auth_System {
 				<?php if ( '' !== $notice_code && 'register' === $active_tab ) : ?>
 					<div class="wperf-notice wperf-notice-error"><?php echo esc_html( $this->get_notice_message( $notice_code ) ); ?></div>
 				<?php endif; ?>
-				<form class="wperf-register-form" method="post" action="" style="margin-top:24px;" data-wperf-phone-check-form data-wperf-phone-check-url="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>" data-wperf-account-phone="#wperf_register_phone">
+				<form class="wperf-register-form" method="post" action="" style="margin-top:24px;" data-wperf-phone-check-form data-wperf-phone-check-url="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>" data-wperf-account-phone="#wperf_register_phone" data-wperf-skip-duplicate-check>
 <p>
 						<label for="wperf_display_name"><?php esc_html_e( 'Name', 'wp-easy-referral' ); ?></label>
 						<input type="text" id="wperf_display_name" name="wperf_display_name" required />
@@ -2308,6 +2305,8 @@ final class WPERF_Referral_Auth_System {
 
 		global $wpdb;
 		$lead_search   = isset( $_GET['wperf_lead_search'] ) ? sanitize_text_field( wp_unslash( $_GET['wperf_lead_search'] ) ) : '';
+		$per_page      = 50;
+		$current_page  = isset( $_GET['wperf_lead_page'] ) ? max( 1, absint( wp_unslash( $_GET['wperf_lead_page'] ) ) ) : 1;
 		$where_sql     = "WHERE 1=1";
 		$where_values  = array();
 
@@ -2321,9 +2320,20 @@ final class WPERF_Referral_Auth_System {
 			$where_values = array( $like, $like, $like, $like, $like, $like, $like );
 		}
 
-		$query    = "SELECT * FROM {$this->table_name} {$where_sql} ORDER BY registered_at DESC";
-		$entries  = empty( $where_values ) ? $wpdb->get_results( $query ) : $wpdb->get_results( $wpdb->prepare( $query, $where_values ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-		$statuses = array( 'Unverified', 'Verified', 'Contacted', 'Pending', 'Ongoing', 'Converted', 'Rejected' );
+		$count_query = "SELECT COUNT(*) FROM {$this->table_name} {$where_sql}";
+		$total_items = empty( $where_values )
+			? (int) $wpdb->get_var( $count_query ) // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+			: (int) $wpdb->get_var( $wpdb->prepare( $count_query, $where_values ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$total_pages  = max( 1, (int) ceil( $total_items / $per_page ) );
+		$current_page = min( $current_page, $total_pages );
+		$offset       = ( $current_page - 1 ) * $per_page;
+
+		$query_values   = $where_values;
+		$query_values[] = $per_page;
+		$query_values[] = $offset;
+		$query          = "SELECT * FROM {$this->table_name} {$where_sql} ORDER BY registered_at DESC LIMIT %d OFFSET %d";
+		$entries        = $wpdb->get_results( $wpdb->prepare( $query, $query_values ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$statuses       = array( 'Unverified', 'Verified', 'Contacted', 'Pending', 'Ongoing', 'Converted', 'Rejected' );
 
 		ob_start();
 		?>
@@ -2455,6 +2465,28 @@ final class WPERF_Referral_Auth_System {
 						</tbody>
 					</table>
 				</div>
+
+				<?php if ( $total_pages > 1 ) : ?>
+					<?php
+					$pagination_base  = remove_query_arg( 'wperf_lead_page', $this->get_current_request_url() );
+					$pagination_links = paginate_links(
+						array(
+							'base'      => add_query_arg( 'wperf_lead_page', '%#%', $pagination_base ),
+							'format'    => '',
+							'current'   => $current_page,
+							'total'     => $total_pages,
+							'type'      => 'list',
+							'prev_text' => __( 'Previous', 'wp-easy-referral' ),
+							'next_text' => __( 'Next', 'wp-easy-referral' ),
+						)
+					);
+					?>
+					<?php if ( $pagination_links ) : ?>
+						<nav class="wperf-lead-pagination" aria-label="<?php esc_attr_e( 'Lead Desk pagination', 'wp-easy-referral' ); ?>" style="margin-top:20px;">
+							<?php echo wp_kses_post( $pagination_links ); ?>
+						</nav>
+					<?php endif; ?>
+				<?php endif; ?>
 			</div>
 		</div>
 		<script>
@@ -3360,6 +3392,7 @@ final class WPERF_Referral_Auth_System {
 			'missing_fields'        => __( 'Please complete all required fields.', 'wp-easy-referral' ),
 			'phone_required'        => __( 'Mobile number is required.', 'wp-easy-referral' ),
 			'referral_phone_required' => __( 'Referral phone number is required when you choose to refer someone.', 'wp-easy-referral' ),
+			'referral_phone_matches'  => __( 'The referral phone number cannot match your own mobile number.', 'wp-easy-referral' ),
 			'invalid_login'         => __( 'Invalid mobile number or password.', 'wp-easy-referral' ),
 			'invalid_email'         => __( 'Please provide a valid email address.', 'wp-easy-referral' ),
 			'weak_password'         => __( 'Password must be at least 6 characters.', 'wp-easy-referral' ),
@@ -3606,6 +3639,11 @@ document.addEventListener('DOMContentLoaded', function () {
 		if (accountInput && normalizePhone(accountInput.value) === phone) {
 			setPhoneError(input, 'The referral phone number cannot be your own mobile number.');
 			return Promise.resolve(false);
+		}
+
+		if (form.hasAttribute('data-wperf-skip-duplicate-check')) {
+			setPhoneError(input, '');
+			return Promise.resolve(true);
 		}
 
 		var endpoint = form.getAttribute('data-wperf-phone-check-url');
