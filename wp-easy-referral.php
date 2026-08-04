@@ -1158,19 +1158,13 @@ final class WPERF_Referral_Auth_System {
 		}
 
 		if ( 'referred' === $form_context || 'dashboard_referral' === $form_context ) {
-			$phone_exists = $this->phone_exists_anywhere( $phone );
-
-			if ( ! $phone_exists && 'dashboard_referral' === $form_context ) {
-				$phone_exists = $this->referral_entry_exists_by_phone( $phone );
-			} elseif ( ! $phone_exists ) {
-				$phone_exists = $this->referral_entry_exists_by_phone( $phone, $referred_by_code );
-			}
-
-			if ( $phone_exists ) {
-				$this->safe_redirect_with_notice( 'register', 'phone_exists' );
-			}
-
 			if ( 'dashboard_referral' === $form_context ) {
+				$current_user       = wp_get_current_user();
+				$current_user_phone = $current_user instanceof WP_User ? $this->normalize_phone( (string) get_user_meta( $current_user->ID, self::META_PHONE, true ) ) : '';
+
+				if ( '' !== $current_user_phone && $current_user_phone === $phone ) {
+					$this->safe_redirect_with_notice( 'register', 'referral_phone_matches' );
+				}
 				$username = $this->generate_unique_username( $display_name, '', $phone );
 				$user_id  = wp_insert_user(
 					array(
@@ -1210,6 +1204,16 @@ final class WPERF_Referral_Auth_System {
 
 				wp_safe_redirect( add_query_arg( array( 'wperf_notice' => 'referral_added' ), $this->get_dashboard_url() ) );
 				exit;
+			}
+
+			$phone_exists = $this->phone_exists_anywhere( $phone );
+
+			if ( ! $phone_exists ) {
+				$phone_exists = $this->referral_entry_exists_by_phone( $phone, $referred_by_code );
+			}
+
+			if ( $phone_exists ) {
+				$this->safe_redirect_with_notice( 'register', 'phone_exists' );
 			}
 
 			$this->insert_registration_entry(
@@ -2158,7 +2162,7 @@ final class WPERF_Referral_Auth_System {
 				<div class="wperf-add-referral-modal" hidden>
 					<div class="wperf-brochure-dialog">
 						<button type="button" class="wperf-brochure-close" data-wperf-close-add-referral aria-label="<?php esc_attr_e( 'Close add referral form', 'wp-easy-referral' ); ?>">×</button>
-						<form class="wperf-register-form" method="post" action="" data-wperf-phone-check-form data-wperf-phone-check-url="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>">
+						<form class="wperf-register-form" method="post" action="" data-wperf-phone-check-form data-wperf-phone-check-url="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>" data-wperf-account-phone="#wperf_dashboard_owner_phone" data-wperf-skip-duplicate-check>
 							<p>
 								<label for="wperf_add_referral_name"><?php esc_html_e( 'Name', 'wp-easy-referral' ); ?></label>
 								<input type="text" id="wperf_add_referral_name" name="wperf_display_name" required placeholder="<?php esc_attr_e( 'Name', 'wp-easy-referral' ); ?>" style="display:block;width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box;background:#fff;color:#111827;" />
@@ -2168,6 +2172,7 @@ final class WPERF_Referral_Auth_System {
 								<input type="text" id="wperf_add_referral_phone" name="wperf_phone" required placeholder="<?php esc_attr_e( 'Phone', 'wp-easy-referral' ); ?>" data-wperf-phone-check style="display:block;width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box;background:#fff;color:#111827;" />
 								<small class="wperf-field-error" data-wperf-phone-error aria-live="polite"></small>
 							</p>
+							<input type="hidden" id="wperf_dashboard_owner_phone" value="<?php echo esc_attr( $phone ); ?>" />
 							<input type="hidden" name="wperf_referral_user_name" value="" />
 							<input type="hidden" name="wperf_referral_user_phone" value="" />
 							<input type="hidden" name="wperf_referred_by_code" value="<?php echo esc_attr( $referral_id ); ?>" />
