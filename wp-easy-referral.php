@@ -70,7 +70,8 @@ final class WPERF_Referral_Entries_List_Table extends WP_List_Table {
 			'source'           => __( 'Source', 'wp-easy-referral' ),
 			'user_source'      => __( 'User Source', 'wp-easy-referral' ),
 			'status'           => __( 'Status', 'wp-easy-referral' ),
-			'remarks'          => __( 'Remarks', 'wp-easy-referral' ),
+			'customer_remarks' => __( 'Customer Remarks', 'wp-easy-referral' ),
+			'remarks'          => __( 'Agent Remarks', 'wp-easy-referral' ),
 		);
 	}
 
@@ -320,6 +321,7 @@ final class WPERF_Referral_Auth_System {
 		add_shortcode( 'wperf_lead_desk', array( $this, 'render_lead_desk_page' ) );
 
 		add_action( 'wp_ajax_wperf_update_lead', array( $this, 'ajax_update_lead' ) );
+		add_action( 'wp_ajax_wperf_update_customer_remarks', array( $this, 'ajax_update_customer_remarks' ) );
 		add_action( 'wp_ajax_wperf_check_phone', array( $this, 'ajax_check_phone' ) );
 		add_action( 'wp_ajax_nopriv_wperf_check_phone', array( $this, 'ajax_check_phone' ) );
 
@@ -386,6 +388,7 @@ final class WPERF_Referral_Auth_System {
 			user_source varchar(50) NOT NULL DEFAULT '',
 			status varchar(50) NOT NULL DEFAULT 'Unverified',
 			remarks text,
+			customer_remarks text,
 			registered_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY  (id),
 			KEY user_id (user_id),
@@ -438,6 +441,11 @@ final class WPERF_Referral_Auth_System {
 		$remarks_column = $wpdb->get_var( "SHOW COLUMNS FROM {$table_name} LIKE 'remarks'" );
 		if ( null === $remarks_column ) {
 			$wpdb->query( "ALTER TABLE {$table_name} ADD remarks text AFTER status" );
+		}
+
+		$customer_remarks_column = $wpdb->get_var( "SHOW COLUMNS FROM {$table_name} LIKE 'customer_remarks'" );
+		if ( null === $customer_remarks_column ) {
+			$wpdb->query( "ALTER TABLE {$table_name} ADD customer_remarks text AFTER remarks" );
 		}
 
 		if ( ! get_role( 'referral_help_agent' ) ) {
@@ -938,7 +946,8 @@ final class WPERF_Referral_Auth_System {
 				<tr><th><?php esc_html_e( 'Source', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( $this->get_source_label( (string) $entry->source, (string) $entry->referred_by_code ) ); ?></td></tr>
 				<tr><th><?php esc_html_e( 'User Source', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->user_source ); ?></td></tr>
 				<tr><th><?php esc_html_e( 'Status', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->status ); ?></td></tr>
-				<tr><th><?php esc_html_e( 'Remarks', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->remarks ); ?></td></tr>
+				<tr><th><?php esc_html_e( 'Customer Remarks', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( isset( $entry->customer_remarks ) ? (string) $entry->customer_remarks : '' ); ?></td></tr>
+				<tr><th><?php esc_html_e( 'Agent Remarks', 'wp-easy-referral' ); ?></th><td><?php echo esc_html( (string) $entry->remarks ); ?></td></tr>
 			</tbody>
 		</table>
 		<?php
@@ -1011,7 +1020,8 @@ final class WPERF_Referral_Auth_System {
 				'Source',
 				'User Source',
 				'Status',
-				'Remarks',
+				'Customer Remarks',
+				'Agent Remarks',
 				'Registered At',
 			),
 			',',
@@ -1036,6 +1046,7 @@ final class WPERF_Referral_Auth_System {
 					$this->get_source_label( isset( $row['source'] ) ? (string) $row['source'] : '', isset( $row['referred_by_code'] ) ? (string) $row['referred_by_code'] : '' ),
 					isset( $row['user_source'] ) ? $row['user_source'] : '',
 					isset( $row['status'] ) ? $row['status'] : '',
+					isset( $row['customer_remarks'] ) ? $row['customer_remarks'] : '',
 					isset( $row['remarks'] ) ? $row['remarks'] : '',
 					isset( $row['registered_at'] ) ? $row['registered_at'] : '',
 				),
@@ -1146,6 +1157,7 @@ final class WPERF_Referral_Auth_System {
 		$referred_by_code    = isset( $_POST['wperf_referred_by_code'] ) ? strtoupper( sanitize_text_field( wp_unslash( $_POST['wperf_referred_by_code'] ) ) ) : '';
 		$form_context        = isset( $_POST['wperf_form_context'] ) ? sanitize_key( wp_unslash( $_POST['wperf_form_context'] ) ) : 'default';
 		$user_source         = isset( $_POST['wperf_user_source'] ) ? sanitize_text_field( wp_unslash( $_POST['wperf_user_source'] ) ) : '';
+		$customer_remarks    = isset( $_POST['wperf_customer_remarks'] ) ? sanitize_textarea_field( wp_unslash( $_POST['wperf_customer_remarks'] ) ) : '';
 		$terms_consent       = isset( $_POST['wperf_terms_consent'] ) ? absint( wp_unslash( $_POST['wperf_terms_consent'] ) ) : 0;
 		$wants_to_refer      = isset( $_POST['wperf_wants_to_refer'] ) && 'yes' === sanitize_key( wp_unslash( $_POST['wperf_wants_to_refer'] ) );
 
@@ -1218,6 +1230,7 @@ final class WPERF_Referral_Auth_System {
 						'referred_by_code'     => (string) get_user_meta( $user_id, self::META_REFERRED_BY_CODE, true ),
 						'source'               => 'referred',
 						'user_source'          => $user_source,
+						'customer_remarks'     => $customer_remarks,
 					)
 				);
 
@@ -1719,9 +1732,10 @@ final class WPERF_Referral_Auth_System {
 				'share_clicks'        => isset( $data['share_clicks'] ) ? absint( $data['share_clicks'] ) : 0,
 				'source'              => isset( $data['source'] ) ? sanitize_key( (string) $data['source'] ) : 'manual',
 				'user_source'         => isset( $data['user_source'] ) ? sanitize_text_field( (string) $data['user_source'] ) : '',
+				'customer_remarks'    => isset( $data['customer_remarks'] ) ? sanitize_textarea_field( (string) $data['customer_remarks'] ) : '',
 				'registered_at'       => current_time( 'mysql' ),
 			),
-			array( '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s' )
+			array( '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s' )
 		);
 	}
 
@@ -2196,6 +2210,10 @@ final class WPERF_Referral_Auth_System {
 								<input type="text" id="wperf_add_referral_phone" name="wperf_phone" required placeholder="<?php esc_attr_e( 'Phone', 'wp-easy-referral' ); ?>" data-wperf-phone-check style="display:block;width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box;background:#fff;color:#111827;" />
 								<small class="wperf-field-error" data-wperf-phone-error aria-live="polite"></small>
 							</p>
+							<p>
+								<label for="wperf_add_referral_customer_remarks"><?php esc_html_e( 'Customer Remarks', 'wp-easy-referral' ); ?></label>
+								<textarea id="wperf_add_referral_customer_remarks" name="wperf_customer_remarks" rows="4" placeholder="<?php esc_attr_e( 'Add remarks about this referral user', 'wp-easy-referral' ); ?>"></textarea>
+							</p>
 							<input type="hidden" id="wperf_dashboard_owner_phone" value="<?php echo esc_attr( $phone ); ?>" />
 							<input type="hidden" name="wperf_referral_user_name" value="" />
 							<input type="hidden" name="wperf_referral_user_phone" value="" />
@@ -2221,12 +2239,23 @@ final class WPERF_Referral_Auth_System {
 					<?php if ( empty( $children ) ) : ?>
 						<div class="wperf-empty-state"><?php esc_html_e( 'No referrals yet.', 'wp-easy-referral' ); ?></div>
 					<?php else : ?>
-						<div class="wperf-table-wrap">
+						<div class="wperf-table-wrap" data-wperf-customer-remarks-table data-wperf-customer-remarks-url="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>" data-wperf-customer-remarks-nonce="<?php echo esc_attr( wp_create_nonce( 'wperf_update_customer_remarks' ) ); ?>">
 							<table class="wperf-table wperf-referral-list-table">
-								<thead><tr><th><?php esc_html_e( 'Your Referral’s Name', 'wp-easy-referral' ); ?></th><th><?php esc_html_e( 'Referral\'s Phone Number', 'wp-easy-referral' ); ?></th><th><?php esc_html_e( 'Status', 'wp-easy-referral' ); ?></th></tr></thead>
+								<thead><tr><th><?php esc_html_e( 'Your Referral’s Name', 'wp-easy-referral' ); ?></th><th><?php esc_html_e( 'Referral\'s Phone Number', 'wp-easy-referral' ); ?></th><th><?php esc_html_e( 'Status', 'wp-easy-referral' ); ?></th><th><?php esc_html_e( 'Customer Remarks', 'wp-easy-referral' ); ?></th></tr></thead>
 								<tbody>
 									<?php foreach ( $children as $child ) : ?>
-										<tr><td><?php echo esc_html( $child['referral_user_name'] ); ?></td><td><?php echo esc_html( $this->mask_lead_phone( $child['referral_user_phone'] ) ); ?></td><td><span class="wperf-status-badge"><?php echo esc_html( $child['status'] ); ?></span></td></tr>
+										<tr>
+											<td><?php echo esc_html( $child['referral_user_name'] ); ?></td>
+											<td><?php echo esc_html( $this->mask_lead_phone( $child['referral_user_phone'] ) ); ?></td>
+											<td><span class="wperf-status-badge"><?php echo esc_html( $child['status'] ); ?></span></td>
+											<td class="wperf-customer-remarks-cell">
+												<textarea class="wperf-customer-remarks-input" rows="3"><?php echo esc_textarea( isset( $child['customer_remarks'] ) ? (string) $child['customer_remarks'] : '' ); ?></textarea>
+												<?php if ( ! empty( $child['entry_id'] ) ) : ?>
+													<button type="button" class="wperf-btn wperf-btn-save-customer-remarks" data-entry-id="<?php echo esc_attr( (string) $child['entry_id'] ); ?>"><?php esc_html_e( 'Save', 'wp-easy-referral' ); ?></button>
+													<span class="wperf-customer-remarks-msg" aria-live="polite"></span>
+												<?php endif; ?>
+											</td>
+										</tr>
 									<?php endforeach; ?>
 								</tbody>
 							</table>
@@ -2308,7 +2337,7 @@ final class WPERF_Referral_Auth_System {
 
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT id, registered_at, name, email, phone, status, remarks FROM {$this->table_name} WHERE referred_by_code = %s ORDER BY registered_at DESC",
+				"SELECT id, registered_at, name, email, phone, status, remarks, customer_remarks FROM {$this->table_name} WHERE referred_by_code = %s ORDER BY registered_at DESC",
 				$referral_code
 			)
 		);
@@ -2417,7 +2446,8 @@ final class WPERF_Referral_Auth_System {
 								<th><?php esc_html_e( 'Phone', 'wp-easy-referral' ); ?></th>
 								<th><?php esc_html_e( 'Referral Code', 'wp-easy-referral' ); ?></th>
 								<th><?php esc_html_e( 'Status', 'wp-easy-referral' ); ?></th>
-								<th><?php esc_html_e( 'Remarks', 'wp-easy-referral' ); ?></th>
+								<th><?php esc_html_e( 'Customer Remarks', 'wp-easy-referral' ); ?></th>
+								<th><?php esc_html_e( 'Agent Remarks', 'wp-easy-referral' ); ?></th>
 								<th><?php esc_html_e( 'Update', 'wp-easy-referral' ); ?></th>
 								<th><?php esc_html_e( 'Referred Users', 'wp-easy-referral' ); ?></th>
 							</tr>
@@ -2425,7 +2455,7 @@ final class WPERF_Referral_Auth_System {
 						<tbody>
 							<?php
 							if ( empty( $entries ) ) {
-								echo '<tr><td colspan="9">' . esc_html__( 'No direct entries found.', 'wp-easy-referral' ) . '</td></tr>';
+								echo '<tr><td colspan="10">' . esc_html__( 'No direct entries found.', 'wp-easy-referral' ) . '</td></tr>';
 							}
 							$row_index = 0;
 							foreach ( $entries as $entry ) {
@@ -2447,6 +2477,7 @@ final class WPERF_Referral_Auth_System {
 											<?php endforeach; ?>
 										</select>
 									</td>
+									<td><div class="wperf-customer-remarks-readonly"><?php echo esc_html( isset( $entry->customer_remarks ) ? (string) $entry->customer_remarks : '' ); ?></div></td>
 									<td>
 										<textarea class="wperf-lead-remarks" rows="2" style="width:220px;padding:6px;border-radius:6px;border:1px solid #d1d5db;font-family:inherit;font-size:13px;resize:vertical;"><?php echo esc_textarea( (string) $entry->remarks ); ?></textarea>
 									</td>
@@ -2459,7 +2490,7 @@ final class WPERF_Referral_Auth_System {
 									</td>
 								</tr>
 								<tr class="wperf-lead-modal-row" id="<?php echo esc_attr( $modal_id ); ?>" hidden>
-									<td colspan="9">
+									<td colspan="10">
 										<div class="wperf-lead-popup-panel" style="background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:18px;box-shadow:0 10px 25px rgba(15,23,42,.12);">
 											<div style="display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:15px;">
 												<h4 style="margin:0;"><?php esc_html_e( 'Referred User List', 'wp-easy-referral' ); ?></h4>
@@ -2474,13 +2505,14 @@ final class WPERF_Referral_Auth_System {
 															<th><?php esc_html_e( 'Mail', 'wp-easy-referral' ); ?></th>
 															<th><?php esc_html_e( 'Phone', 'wp-easy-referral' ); ?></th>
 															<th><?php esc_html_e( 'Status', 'wp-easy-referral' ); ?></th>
-															<th><?php esc_html_e( 'Remarks', 'wp-easy-referral' ); ?></th>
+															<th><?php esc_html_e( 'Customer Remarks', 'wp-easy-referral' ); ?></th>
+															<th><?php esc_html_e( 'Agent Remarks', 'wp-easy-referral' ); ?></th>
 															<th><?php esc_html_e( 'Update', 'wp-easy-referral' ); ?></th>
 														</tr>
 													</thead>
 													<tbody>
 														<?php if ( empty( $children ) ) : ?>
-															<tr><td colspan="7"><?php esc_html_e( 'No referred users found.', 'wp-easy-referral' ); ?></td></tr>
+															<tr><td colspan="8"><?php esc_html_e( 'No referred users found.', 'wp-easy-referral' ); ?></td></tr>
 														<?php endif; ?>
 														<?php foreach ( $children as $child ) : ?>
 															<tr data-id="<?php echo esc_attr( $child->id ); ?>">
@@ -2495,6 +2527,7 @@ final class WPERF_Referral_Auth_System {
 																		<?php endforeach; ?>
 																	</select>
 																</td>
+																<td><div class="wperf-customer-remarks-readonly"><?php echo esc_html( isset( $child->customer_remarks ) ? (string) $child->customer_remarks : '' ); ?></div></td>
 																<td>
 																	<textarea class="wperf-lead-remarks" rows="2" style="width:220px;padding:6px;border-radius:6px;border:1px solid #d1d5db;font-family:inherit;font-size:13px;resize:vertical;"><?php echo esc_textarea( (string) $child->remarks ); ?></textarea>
 																</td>
@@ -2644,7 +2677,62 @@ final class WPERF_Referral_Auth_System {
 	}
 
 	/**
-	 * AJAX logic to update lead status and remarks.
+	 * Update customer remarks for a referral owned by the logged-in referral user.
+	 *
+	 * @return void
+	 */
+	public function ajax_update_customer_remarks() {
+		$nonce = isset( $_POST['nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['nonce'] ) ) : '';
+		if ( '' === $nonce || ! wp_verify_nonce( $nonce, 'wperf_update_customer_remarks' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Invalid request. Please refresh and try again.', 'wp-easy-referral' ) ) );
+		}
+
+		if ( ! is_user_logged_in() || ! $this->current_user_is_referral_user() ) {
+			wp_send_json_error( array( 'message' => __( 'You are not allowed to update these remarks.', 'wp-easy-referral' ) ) );
+		}
+
+		$entry_id         = isset( $_POST['entry_id'] ) ? absint( wp_unslash( $_POST['entry_id'] ) ) : 0;
+		$customer_remarks = isset( $_POST['customer_remarks'] ) ? sanitize_textarea_field( wp_unslash( $_POST['customer_remarks'] ) ) : '';
+		if ( $entry_id <= 0 ) {
+			wp_send_json_error( array( 'message' => __( 'Invalid referral entry.', 'wp-easy-referral' ) ) );
+		}
+
+		$current_user  = wp_get_current_user();
+		$referral_code = (string) get_user_meta( $current_user->ID, self::META_REFERRAL_ID, true );
+		if ( '' === $referral_code ) {
+			wp_send_json_error( array( 'message' => __( 'Referral ownership could not be verified.', 'wp-easy-referral' ) ) );
+		}
+
+		global $wpdb;
+		$owned_entry = (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT id FROM {$this->table_name} WHERE id = %d AND referred_by_code = %s LIMIT 1",
+				$entry_id,
+				$referral_code
+			)
+		);
+
+		if ( $owned_entry <= 0 ) {
+			wp_send_json_error( array( 'message' => __( 'You are not allowed to update this referral.', 'wp-easy-referral' ) ) );
+		}
+
+		$updated = $wpdb->update(
+			$this->table_name,
+			array( 'customer_remarks' => $customer_remarks ),
+			array( 'id' => $entry_id ),
+			array( '%s' ),
+			array( '%d' )
+		);
+
+		if ( false === $updated ) {
+			wp_send_json_error( array( 'message' => __( 'Could not save customer remarks.', 'wp-easy-referral' ) ) );
+		}
+
+		wp_send_json_success( array( 'message' => __( 'Customer remarks saved.', 'wp-easy-referral' ) ) );
+	}
+
+	/**
+	 * AJAX logic to update lead status and Agent Remarks.
 	 */
 	public function ajax_update_lead() {
 		if ( ! isset( $_POST['nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['nonce'] ) ), 'wperf_update_lead' ) ) {
@@ -2900,10 +2988,11 @@ final class WPERF_Referral_Auth_System {
 	private function get_direct_referrals( $user_id ) {
 		global $wpdb;
 
-		$output       = array();
-		$seen_phones  = array();
+		$output        = array();
+		$seen_phones   = array();
 		$seen_user_ids = array();
-		$users        = get_users(
+		$referral_code = (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true );
+		$users         = get_users(
 			array(
 				'role'       => self::ROLE_KEY,
 				'meta_key'   => self::META_REFERRED_BY_USER_ID,
@@ -2921,15 +3010,18 @@ final class WPERF_Referral_Auth_System {
 				continue;
 			}
 
-			$status   = $wpdb->get_var( $wpdb->prepare( "SELECT status FROM {$this->table_name} WHERE user_id = %d ORDER BY id ASC LIMIT 1", $child_user_id ) );
-			$output[] = array(
+			$entry_row = $wpdb->get_row( $wpdb->prepare( "SELECT id, status, customer_remarks FROM {$this->table_name} WHERE user_id = %d AND referred_by_code = %s ORDER BY id ASC LIMIT 1", $child_user_id, $referral_code ), ARRAY_A );
+			$status    = is_array( $entry_row ) && ! empty( $entry_row['status'] ) ? (string) $entry_row['status'] : 'Unverified';
+			$output[]  = array(
 				'display_name'        => $user->display_name,
 				'user_email'          => $user->user_email,
 				'phone'               => $child_phone,
 				'referral_code'       => (string) get_user_meta( $child_user_id, self::META_REFERRAL_ID, true ),
 				'referral_user_name'  => $user->display_name,
 				'referral_user_phone' => $child_phone,
-				'status'              => $status ? $status : 'Unverified',
+				'status'              => $status,
+				'entry_id'            => is_array( $entry_row ) && isset( $entry_row['id'] ) ? absint( $entry_row['id'] ) : 0,
+				'customer_remarks'    => is_array( $entry_row ) && isset( $entry_row['customer_remarks'] ) ? (string) $entry_row['customer_remarks'] : '',
 			);
 
 			$seen_user_ids[] = $child_user_id;
@@ -2938,11 +3030,10 @@ final class WPERF_Referral_Auth_System {
 			}
 		}
 
-		$referral_code = (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true );
 		if ( '' !== $referral_code ) {
 			$rows = $wpdb->get_results(
 				$wpdb->prepare(
-					"SELECT name, email, phone, referral_code, referral_user_name, referral_user_phone, status FROM {$this->table_name} WHERE user_id = 0 AND referred_by_code = %s ORDER BY registered_at DESC, id DESC",
+					"SELECT id, name, email, phone, referral_code, referral_user_name, referral_user_phone, status, customer_remarks FROM {$this->table_name} WHERE user_id = 0 AND referred_by_code = %s ORDER BY registered_at DESC, id DESC",
 					$referral_code
 				),
 				ARRAY_A
@@ -2967,6 +3058,8 @@ final class WPERF_Referral_Auth_System {
 						'referral_user_name'  => $row_name,
 						'referral_user_phone' => $row_phone,
 						'status'              => isset( $row['status'] ) ? (string) $row['status'] : 'Unverified',
+						'entry_id'            => isset( $row['id'] ) ? absint( $row['id'] ) : 0,
+						'customer_remarks'    => isset( $row['customer_remarks'] ) ? (string) $row['customer_remarks'] : '',
 					);
 
 					if ( '' !== $row_phone ) {
@@ -3625,7 +3718,7 @@ final class WPERF_Referral_Auth_System {
 	 * @return string
 	 */
 	private function get_css() {
-		return '.wperf-card{--wperf-bg:#ffffff;--wperf-text:#111827;--wperf-muted:#667085;--wperf-border:#e5e7eb;--wperf-primary:#111827;--wperf-shadow:0 20px 50px rgba(2,6,23,.08);max-width:920px;margin:0 auto;background:var(--wperf-bg);border:1px solid var(--wperf-border);border-radius:18px;box-shadow:var(--wperf-shadow);overflow:hidden}.wperf-tab-nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px;background:#f3f4f6;border-bottom:1px solid var(--wperf-border)}.wperf-tab-btn{border:0;border-radius:12px;background:transparent;color:#374151;font-size:15px;font-weight:600;padding:14px 18px;cursor:pointer}.wperf-tab-btn.is-active{background:#fff;color:#111827;box-shadow:0 4px 14px rgba(0,0,0,.06)}.wperf-tab-panel{display:none;padding:28px}.wperf-tab-panel.is-active{display:block}.wperf-title{margin:0 0 8px;font-size:28px;line-height:1.15;font-weight:700;color:var(--wperf-text)}.wperf-subtitle{margin:28px 0 14px;font-size:18px;font-weight:700;color:var(--wperf-text)}.wperf-copy{margin:0 0 24px;color:var(--wperf-muted);font-size:15px;line-height:1.65}.wperf-phone-login-form p,.wperf-register-form p{margin:0 0 18px}.wperf-phone-login-form label,.wperf-register-form label{display:block;margin:0 0 8px;font-size:14px;font-weight:600;color:var(--wperf-text)}.wperf-phone-login-form input[type=text],.wperf-phone-login-form input[type=email],.wperf-phone-login-form input[type=password],.wperf-register-form input[type=text],.wperf-register-form input[type=email],.wperf-register-form input[type=password]{width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box}.wperf-referral-highlight{background:#f8fafc;border:1px solid #dbe4ee;border-radius:14px;padding:16px 16px 0;margin:0 0 20px}.wperf-referral-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.wperf-btn{display:inline-flex!important;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:0 20px;border:0;border-radius:12px;font-size:15px;font-weight:700;text-decoration:none;cursor:pointer;background:var(--wperf-primary)!important;color:#fff!important}.wperf-btn-google{background:#fff!important;color:#111827!important;border:1px solid #d1d5db!important;width:100%;margin-top:12px}.wperf-google-icon{display:inline-flex;align-items:center}.wperf-btn-secondary{background:#fff!important;color:#111827!important;border:1px solid var(--wperf-border)!important}.wperf-actions,.wperf-share-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:18px}.wperf-logged-in,.wperf-dashboard{padding:30px}.wperf-notice{padding:14px 16px;border-radius:12px;font-size:14px;margin-bottom:18px}.wperf-notice-warning{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412}.wperf-notice-error{padding:0;margin:-6px 0 14px;border:0;background:transparent;color:#dc2626;font-size:12px;line-height:1.5}.wperf-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px}.wperf-stat-box{padding:18px;border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb}.wperf-stat-label{font-size:13px;color:#667085;margin-bottom:8px}.wperf-stat-value{font-size:22px;font-weight:700;color:#111827;word-break:break-word}.wperf-small{font-size:16px}.wperf-share-card-link{text-decoration:none}.wperf-share-card{position:relative;overflow:hidden;min-height:370px;border-radius:0;padding:26px;display:flex;align-items:flex-end;color:#fff;margin-top:10px}.wperf-share-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(17,24,39,.08),rgba(17,24,39,.58))}.wperf-share-content{position:relative;z-index:2}.wperf-share-kicker{font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.9}.wperf-share-name{margin:10px 0 8px;font-size:30px;color:#fff}.wperf-share-code{display:inline-block;padding:10px 14px;border-radius:999px;background:rgba(255,255,255,.12);backdrop-filter:blur(6px);font-weight:700}.wperf-share-message{margin:16px 0 0;font-size:18px;max-width:420px;color:#fff}.wperf-consent-field{display:flex!important;align-items:flex-start;gap:10px;margin:14px 0}.wperf-terms-checkbox{display:inline-block!important;appearance:auto!important;-webkit-appearance:checkbox!important;width:18px!important;height:18px!important;min-width:18px!important;margin:3px 0 0!important;opacity:1!important;visibility:visible!important;position:static!important;clip:auto!important;pointer-events:auto!important}.wperf-consent-label{display:inline!important;font-weight:400;line-height:1.5;margin:0}.wperf-consent-label a{text-decoration:underline}.wperf-share-link-box,.wperf-profile-extra{margin-top:16px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:12px;background:#fff}.wperf-table{width:100%;border-collapse:collapse}.wperf-table th,.wperf-table td{padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:left;font-size:14px}.wperf-brochure-modal[hidden]{display:none!important}.wperf-brochure-modal{position:fixed;inset:0;z-index:99999;background:rgba(17,24,39,.72);padding:24px;display:flex;align-items:center;justify-content:center}.wperf-brochure-dialog{position:relative;width:min(960px,100%);max-height:90vh;background:#fff;border-radius:16px;padding:20px 20px 16px;box-sizing:border-box;display:flex;flex-direction:column;gap:14px}.wperf-brochure-close{position:absolute;top:10px;right:12px;border:0;background:transparent;font-size:28px;line-height:1;cursor:pointer;color:#111827}.wperf-brochure-frame-wrap{margin-top:22px}.wperf-brochure-frame{width:100%;height:min(70vh,720px);border:1px solid #e5e7eb;border-radius:10px;background:#fff}.wperf-brochure-footer{display:flex;justify-content:flex-end}.wperf-shared-banner-image{display:block;width:100%;height:auto;max-height:none;border-radius:0}.wperf-shared-banner-image-mobile{display:none}.wperf-add-referral-modal[hidden]{display:none!important}.wperf-add-referral-modal{position:fixed;inset:0;z-index:99999;background:rgba(17,24,39,.72);padding:24px;display:flex;align-items:center;justify-content:center}.wperf-lead-search-form{margin:0 0 18px}.wperf-lead-search-form p{display:flex;gap:10px;align-items:center}.wperf-lead-search-form input[type=search]{width:min(360px,100%);height:42px;padding:0 12px;border:1px solid #d1d5db;border-radius:10px}.wperf-field-hint{display:block;margin-top:6px;color:#6b7280;font-size:13px}.wperf-field-error{display:block;min-height:18px;margin-top:5px;color:#dc2626;font-size:12px;line-height:1.4}.wperf-checkbox-option{display:inline-flex!important;align-items:center;gap:8px;margin-top:8px;font-weight:400}.wperf-checkbox-option span{color:var(--wperf-text)}.wperf-checkbox-option input[type=checkbox]{display:inline-block!important;appearance:auto!important;-webkit-appearance:checkbox!important;width:16px!important;height:16px!important;margin:0!important;opacity:1!important;position:static!important;visibility:visible!important}.wperf-share-link-box{display:block}.wperf-copy-link-row{display:flex;gap:8px;align-items:center;margin-top:8px}.wperf-copy-link-input{flex:1;width:100%;height:42px;border:1px solid #d1d5db;border-radius:8px;padding:0 12px;background:#fff;color:#111827;box-sizing:border-box}.wperf-copy-link-btn{border:0!important;border-radius:8px!important;padding:10px 16px!important;background:#000!important;color:#fff!important;cursor:pointer!important;font-weight:700!important;line-height:1!important}.wperf-copy-link-btn:hover,.wperf-copy-link-btn:focus{background:#111!important;color:#fff!important}.wperf-copy-feedback{display:inline-block;margin-top:6px;font-style:normal;font-size:12px;font-weight:700;color:#047857}.wperf-lead-pagination{display:flex;justify-content:center;width:100%;margin-top:24px}.wperf-lead-pagination>ul.page-numbers{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;margin:0;padding:0;list-style:none}.wperf-lead-pagination>ul.page-numbers>li{margin:0;padding:0}.wperf-lead-pagination .page-numbers a.page-numbers,.wperf-lead-pagination .page-numbers span.page-numbers{display:inline-flex;align-items:center;justify-content:center;min-width:40px;height:40px;padding:0 12px;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#111827;font-size:14px;font-weight:700;line-height:1;text-decoration:none;transition:border-color .2s ease,background-color .2s ease,color .2s ease}.wperf-lead-pagination .page-numbers a.page-numbers:hover,.wperf-lead-pagination .page-numbers a.page-numbers:focus{border-color:#111827;background:#f3f4f6;color:#111827}.wperf-lead-pagination .page-numbers span.page-numbers.current{border-color:#111827;background:#111827;color:#fff}.wperf-lead-pagination .page-numbers span.page-numbers.dots{min-width:auto;padding:0 4px;border-color:transparent;background:transparent}.wperf-user-dashboard-card,.wperf-shared-page-card,.wperf-public-share-card{max-width:1180px;border:0;border-radius:28px;background:#f4f7fb;box-shadow:0 24px 70px rgba(15,23,42,.12)}.wperf-user-dashboard,.wperf-shared-page,.wperf-public-share-page{padding:34px;background:linear-gradient(180deg,#f8fafc 0%,#eef3f8 100%)}.wperf-user-dashboard-header,.wperf-lead-desk-header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;padding:24px 26px;margin-bottom:22px;border:1px solid #dce4ee;border-radius:20px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,.06)}.wperf-user-dashboard-header .wperf-copy,.wperf-lead-desk-header .wperf-copy{margin-bottom:0}.wperf-dashboard-stats{grid-template-columns:repeat(3,minmax(0,1fr));margin:0 0 22px}.wperf-dashboard-stats .wperf-stat-box{position:relative;min-height:116px;padding:20px 22px;border:1px solid #dce4ee;border-radius:18px;background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.045);overflow:hidden}.wperf-dashboard-stats .wperf-stat-box:after{content:"";position:absolute;right:-20px;bottom:-34px;width:92px;height:92px;border-radius:50%;background:rgba(15,23,42,.035)}.wperf-dashboard-stats .wperf-stat-label{position:relative;z-index:1;font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}.wperf-dashboard-stats .wperf-stat-value{position:relative;z-index:1;font-size:24px;line-height:1.25}.wperf-dashboard-panel{padding:24px;margin-top:22px;border:1px solid #dce4ee;border-radius:22px;background:#fff;box-shadow:0 14px 34px rgba(15,23,42,.055)}.wperf-referral-card-panel>.wperf-subtitle{margin-top:0}.wperf-referral-card-panel .wperf-share-card{border-radius:22px;box-shadow:0 22px 46px rgba(15,23,42,.2);transition:transform .25s ease,box-shadow .25s ease}.wperf-referral-card-panel .wperf-share-card-link:hover .wperf-share-card{transform:translateY(-3px);box-shadow:0 28px 54px rgba(15,23,42,.24)}.wperf-share-card{aspect-ratio:16/7;min-height:0;border-radius:24px;padding:34px;margin-top:14px;background-color:#111827;box-shadow:0 20px 50px rgba(15,23,42,.2)}.wperf-share-overlay{background:linear-gradient(135deg,rgba(15,23,42,.1),rgba(15,23,42,.78))}.wperf-share-kicker{display:inline-flex;padding:7px 10px;border:1px solid rgba(255,255,255,.28);border-radius:999px;background:rgba(15,23,42,.18);font-weight:700}.wperf-share-name{font-size:36px;line-height:1.1}.wperf-share-code{padding:11px 16px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.14)}.wperf-share-message{font-size:19px;line-height:1.55}.wperf-referral-card-panel .wperf-share-actions{padding-top:2px}.wperf-referral-card-panel .wperf-share-link-box{padding:18px;border-color:#dce4ee;background:#f8fafc}.wperf-dashboard-brochure-btn{display:flex!important;width:max-content;margin:22px auto 0}.wperf-referral-list-add-btn{flex:0 0 auto;min-height:44px;padding:0 16px}.wperf-section-heading{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:16px}.wperf-section-heading .wperf-subtitle{margin:3px 0 0}.wperf-section-eyebrow{display:block;color:#64748b;font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}.wperf-section-count{display:inline-flex;align-items:center;justify-content:center;min-width:42px;height:42px;padding:0 12px;border-radius:999px;background:#111827;color:#fff;font-size:14px;font-weight:800}.wperf-table-wrap{overflow:hidden;border:1px solid #dce4ee;border-radius:16px;background:#fff}.wperf-referral-list-table th,.wperf-project-table th,.wperf-lead-table th,.wperf-lead-child-table th{padding:14px 16px;background:#eef2f7;color:#334155;font-size:12px;font-weight:800;letter-spacing:.04em;text-transform:uppercase}.wperf-referral-list-table td,.wperf-project-table td{padding:15px 16px}.wperf-referral-list-table tbody tr:hover,.wperf-project-table tbody tr:hover{background:#f8fafc}.wperf-status-badge{display:inline-flex;align-items:center;min-height:28px;padding:0 10px;border:1px solid #cbd5e1;border-radius:999px;background:#f8fafc;color:#334155;font-size:12px;font-weight:700}.wperf-empty-state{padding:34px;border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;color:#64748b;text-align:center}.wperf-shared-page-card{overflow:visible}.wperf-shared-page{padding-top:26px}.wperf-shared-page .wperf-shared-banner-image{border-radius:22px;box-shadow:0 18px 42px rgba(15,23,42,.14)}.wperf-shared-page .wperf-notice{margin-top:22px}.wperf-shared-page .wperf-brochure-row{justify-content:center;padding:20px;margin-top:24px;border:1px solid #dce4ee;border-radius:18px;background:#fff}.wperf-project-offers{padding:24px;margin-top:26px;border:1px solid #dce4ee;border-radius:22px;background:#fff;box-shadow:0 14px 34px rgba(15,23,42,.055)}.wperf-project-link{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:0 15px;border-radius:9px;background:#111827;color:#fff!important;font-size:13px;font-weight:800;text-decoration:none!important}.wperf-project-link:hover,.wperf-project-link:focus{background:#334155;color:#fff!important}.wperf-agent-login-wrap{max-width:560px;margin:50px auto;border:0;border-radius:24px;background:#eef3f8;box-shadow:0 24px 70px rgba(15,23,42,.14)}.wperf-agent-login-shell{padding:10px}.wperf-agent-login-header{padding:28px 28px 22px;border-radius:18px 18px 0 0;background:#111827}.wperf-agent-login-header .wperf-section-eyebrow{color:#cbd5e1}.wperf-agent-login-header .wperf-title{margin-top:6px;color:#fff}.wperf-agent-login-header .wperf-copy{margin-bottom:0;color:#cbd5e1}.wperf-agent-login-form{padding:26px 28px 28px;border-radius:0 0 18px 18px;background:#fff}.wperf-agent-login-form #loginform{margin:0}.wperf-agent-login-form #loginform p{margin:0 0 18px}.wperf-agent-login-form #loginform label{display:block;margin-bottom:8px;color:#111827;font-size:14px;font-weight:700}.wperf-agent-login-form #loginform input[type=text],.wperf-agent-login-form #loginform input[type=password]{display:block;width:100%;height:50px;padding:0 15px;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:11px;background:#fff;color:#111827;font-size:15px}.wperf-agent-login-form #loginform input[type=text]:focus,.wperf-agent-login-form #loginform input[type=password]:focus{border-color:#111827;outline:2px solid rgba(17,24,39,.12);outline-offset:1px}.wperf-agent-login-form #loginform .login-remember label{display:flex;align-items:center;gap:8px;margin:0;font-weight:500}.wperf-agent-login-form #loginform .login-remember input{width:17px;height:17px;margin:0}.wperf-agent-login-form #loginform .login-submit{margin-bottom:0}.wperf-agent-login-form #wp-submit{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:50px;padding:0 20px;border:0;border-radius:11px;background:#111827;color:#fff;font-size:15px;font-weight:800;cursor:pointer}.wperf-agent-login-form #wp-submit:hover,.wperf-agent-login-form #wp-submit:focus{background:#334155}.wperf-lead-desk-card{border:0;border-radius:24px;background:#eef3f8;box-shadow:0 24px 70px rgba(15,23,42,.12)}.wperf-lead-desk-shell{padding:30px!important}.wperf-lead-toolbar{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 18px;margin-bottom:18px;border:1px solid #dce4ee;border-radius:16px;background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.045)}.wperf-lead-summary{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.wperf-lead-summary span{display:inline-flex;align-items:center;min-height:34px;padding:0 11px;border-radius:999px;background:#eef2f7;color:#475569;font-size:12px;font-weight:700}.wperf-lead-summary strong{margin-right:4px;color:#0f172a;font-size:14px}.wperf-lead-search-form{margin:0}.wperf-lead-search-form p{margin:0}.wperf-lead-table-wrap{border:1px solid #dce4ee;border-radius:18px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,.05)}.wperf-lead-table{min-width:1180px}.wperf-lead-table td{padding:13px 14px;vertical-align:middle}.wperf-lead-row{transition:background-color .2s ease}.wperf-lead-row:hover{background:#eef6ff!important}.wperf-lead-status{min-height:38px!important;padding:0 10px!important;border-color:#cbd5e1!important;border-radius:9px!important;background:#fff!important}.wperf-lead-remarks{min-height:64px!important;padding:9px 10px!important;border-color:#cbd5e1!important;border-radius:9px!important;background:#fff!important}.wperf-btn-save-lead,.wperf-btn-view-referrals,.wperf-btn-close-referrals{border-radius:9px!important}.wperf-lead-popup-panel{border-color:#cbd5e1!important;border-radius:16px!important;background:#f8fafc!important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.7)!important}.wperf-lead-child-table{background:#fff;border-radius:12px;overflow:hidden}.wperf-public-share-wrap{display:flex;align-items:center;min-height:70vh;padding-left:24px;padding-right:24px;box-sizing:border-box}.wperf-public-share-card{width:min(1180px,100%);max-width:1180px}.wperf-public-share-page{padding:38px}.wperf-public-share-page .wperf-share-card{width:100%;aspect-ratio:16/9;min-height:520px;margin-top:0;background-size:contain!important;background-repeat:no-repeat!important;background-position:center!important}.wperf-public-share-page .wperf-share-content{max-width:720px}.wperf-public-share-page>.wperf-actions{justify-content:center;margin-top:28px}.wperf-virtual-page{padding:30px 16px; width: 100%}@media (max-width:980px){.wperf-dashboard-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.wperf-lead-toolbar{align-items:stretch;flex-direction:column}.wperf-lead-search-form p{width:100%}.wperf-lead-search-form input[type=search]{flex:1;width:auto;max-width:none}}@media (max-width:767px){.wperf-user-dashboard,.wperf-shared-page,.wperf-public-share-page,.wperf-lead-desk-shell{padding:18px!important}.wperf-user-dashboard-header,.wperf-lead-desk-header{align-items:stretch;flex-direction:column;padding:20px}.wperf-user-dashboard-header .wperf-actions,.wperf-lead-desk-header .wperf-actions{margin-top:0}.wperf-dashboard-stats{grid-template-columns:1fr}.wperf-dashboard-panel,.wperf-project-offers{padding:18px}.wperf-section-heading{align-items:flex-start;flex-wrap:wrap}.wperf-share-card{aspect-ratio:16/9;min-height:0;padding:24px}.wperf-share-name{font-size:30px}.wperf-share-message{font-size:16px}.wperf-copy-link-row{align-items:stretch;flex-direction:column}.wperf-copy-link-btn{min-height:42px}.wperf-lead-search-form p{align-items:stretch;flex-direction:column}.wperf-lead-search-form .wperf-btn{width:100%}.wperf-agent-login-wrap{margin:24px auto}.wperf-agent-login-header,.wperf-agent-login-form{padding:22px}.wperf-referral-list-add-btn{width:100%}.wperf-public-share-page .wperf-share-card{aspect-ratio:16/9;min-height:0}}@media (max-width:767px){.wperf-tab-panel,.wperf-logged-in,.wperf-dashboard{padding:20px}.wperf-title{font-size:24px}.wperf-stats,.wperf-referral-grid{grid-template-columns:1fr}.wperf-shared-banner-image-desktop{display:none!important}.wperf-shared-banner-image-mobile{display:block!important}}';
+		return '.wperf-card{--wperf-bg:#ffffff;--wperf-text:#111827;--wperf-muted:#667085;--wperf-border:#e5e7eb;--wperf-primary:#111827;--wperf-shadow:0 20px 50px rgba(2,6,23,.08);max-width:920px;margin:0 auto;background:var(--wperf-bg);border:1px solid var(--wperf-border);border-radius:18px;box-shadow:var(--wperf-shadow);overflow:hidden}.wperf-tab-nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px;background:#f3f4f6;border-bottom:1px solid var(--wperf-border)}.wperf-tab-btn{border:0;border-radius:12px;background:transparent;color:#374151;font-size:15px;font-weight:600;padding:14px 18px;cursor:pointer}.wperf-tab-btn.is-active{background:#fff;color:#111827;box-shadow:0 4px 14px rgba(0,0,0,.06)}.wperf-tab-panel{display:none;padding:28px}.wperf-tab-panel.is-active{display:block}.wperf-title{margin:0 0 8px;font-size:28px;line-height:1.15;font-weight:700;color:var(--wperf-text)}.wperf-subtitle{margin:28px 0 14px;font-size:18px;font-weight:700;color:var(--wperf-text)}.wperf-copy{margin:0 0 24px;color:var(--wperf-muted);font-size:15px;line-height:1.65}.wperf-phone-login-form p,.wperf-register-form p{margin:0 0 18px}.wperf-phone-login-form label,.wperf-register-form label{display:block;margin:0 0 8px;font-size:14px;font-weight:600;color:var(--wperf-text)}.wperf-phone-login-form input[type=text],.wperf-phone-login-form input[type=email],.wperf-phone-login-form input[type=password],.wperf-register-form input[type=text],.wperf-register-form input[type=email],.wperf-register-form input[type=password]{width:100%;height:50px;padding:0 16px;border:1px solid #d1d5db;border-radius:12px;font-size:15px;box-sizing:border-box}.wperf-referral-highlight{background:#f8fafc;border:1px solid #dbe4ee;border-radius:14px;padding:16px 16px 0;margin:0 0 20px}.wperf-referral-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.wperf-btn{display:inline-flex!important;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:0 20px;border:0;border-radius:12px;font-size:15px;font-weight:700;text-decoration:none;cursor:pointer;background:var(--wperf-primary)!important;color:#fff!important}.wperf-btn-google{background:#fff!important;color:#111827!important;border:1px solid #d1d5db!important;width:100%;margin-top:12px}.wperf-google-icon{display:inline-flex;align-items:center}.wperf-btn-secondary{background:#fff!important;color:#111827!important;border:1px solid var(--wperf-border)!important}.wperf-actions,.wperf-share-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:18px}.wperf-logged-in,.wperf-dashboard{padding:30px}.wperf-notice{padding:14px 16px;border-radius:12px;font-size:14px;margin-bottom:18px}.wperf-notice-warning{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412}.wperf-notice-error{padding:0;margin:-6px 0 14px;border:0;background:transparent;color:#dc2626;font-size:12px;line-height:1.5}.wperf-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px}.wperf-stat-box{padding:18px;border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb}.wperf-stat-label{font-size:13px;color:#667085;margin-bottom:8px}.wperf-stat-value{font-size:22px;font-weight:700;color:#111827;word-break:break-word}.wperf-small{font-size:16px}.wperf-share-card-link{text-decoration:none}.wperf-share-card{position:relative;overflow:hidden;min-height:370px;border-radius:0;padding:26px;display:flex;align-items:flex-end;color:#fff;margin-top:10px}.wperf-share-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(17,24,39,.08),rgba(17,24,39,.58))}.wperf-share-content{position:relative;z-index:2}.wperf-share-kicker{font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.9}.wperf-share-name{margin:10px 0 8px;font-size:30px;color:#fff}.wperf-share-code{display:inline-block;padding:10px 14px;border-radius:999px;background:rgba(255,255,255,.12);backdrop-filter:blur(6px);font-weight:700}.wperf-share-message{margin:16px 0 0;font-size:18px;max-width:420px;color:#fff}.wperf-consent-field{display:flex!important;align-items:flex-start;gap:10px;margin:14px 0}.wperf-terms-checkbox{display:inline-block!important;appearance:auto!important;-webkit-appearance:checkbox!important;width:18px!important;height:18px!important;min-width:18px!important;margin:3px 0 0!important;opacity:1!important;visibility:visible!important;position:static!important;clip:auto!important;pointer-events:auto!important}.wperf-consent-label{display:inline!important;font-weight:400;line-height:1.5;margin:0}.wperf-consent-label a{text-decoration:underline}.wperf-share-link-box,.wperf-profile-extra{margin-top:16px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:12px;background:#fff}.wperf-table{width:100%;border-collapse:collapse}.wperf-table th,.wperf-table td{padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:left;font-size:14px}.wperf-brochure-modal[hidden]{display:none!important}.wperf-brochure-modal{position:fixed;inset:0;z-index:99999;background:rgba(17,24,39,.72);padding:24px;display:flex;align-items:center;justify-content:center}.wperf-brochure-dialog{position:relative;width:min(960px,100%);max-height:90vh;background:#fff;border-radius:16px;padding:20px 20px 16px;box-sizing:border-box;display:flex;flex-direction:column;gap:14px}.wperf-brochure-close{position:absolute;top:10px;right:12px;border:0;background:transparent;font-size:28px;line-height:1;cursor:pointer;color:#111827}.wperf-brochure-frame-wrap{margin-top:22px}.wperf-brochure-frame{width:100%;height:min(70vh,720px);border:1px solid #e5e7eb;border-radius:10px;background:#fff}.wperf-brochure-footer{display:flex;justify-content:flex-end}.wperf-shared-banner-image{display:block;width:100%;height:auto;max-height:none;border-radius:0}.wperf-shared-banner-image-mobile{display:none}.wperf-add-referral-modal[hidden]{display:none!important}.wperf-add-referral-modal{position:fixed;inset:0;z-index:99999;background:rgba(17,24,39,.72);padding:24px;display:flex;align-items:center;justify-content:center}.wperf-lead-search-form{margin:0 0 18px}.wperf-lead-search-form p{display:flex;gap:10px;align-items:center}.wperf-lead-search-form input[type=search]{width:min(360px,100%);height:42px;padding:0 12px;border:1px solid #d1d5db;border-radius:10px}.wperf-field-hint{display:block;margin-top:6px;color:#6b7280;font-size:13px}.wperf-field-error{display:block;min-height:18px;margin-top:5px;color:#dc2626;font-size:12px;line-height:1.4}.wperf-checkbox-option{display:inline-flex!important;align-items:center;gap:8px;margin-top:8px;font-weight:400}.wperf-checkbox-option span{color:var(--wperf-text)}.wperf-checkbox-option input[type=checkbox]{display:inline-block!important;appearance:auto!important;-webkit-appearance:checkbox!important;width:16px!important;height:16px!important;margin:0!important;opacity:1!important;position:static!important;visibility:visible!important}.wperf-share-link-box{display:block}.wperf-copy-link-row{display:flex;gap:8px;align-items:center;margin-top:8px}.wperf-copy-link-input{flex:1;width:100%;height:42px;border:1px solid #d1d5db;border-radius:8px;padding:0 12px;background:#fff;color:#111827;box-sizing:border-box}.wperf-copy-link-btn{border:0!important;border-radius:8px!important;padding:10px 16px!important;background:#000!important;color:#fff!important;cursor:pointer!important;font-weight:700!important;line-height:1!important}.wperf-copy-link-btn:hover,.wperf-copy-link-btn:focus{background:#111!important;color:#fff!important}.wperf-copy-feedback{display:inline-block;margin-top:6px;font-style:normal;font-size:12px;font-weight:700;color:#047857}.wperf-lead-pagination{display:flex;justify-content:center;width:100%;margin-top:24px}.wperf-lead-pagination>ul.page-numbers{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;margin:0;padding:0;list-style:none}.wperf-lead-pagination>ul.page-numbers>li{margin:0;padding:0}.wperf-lead-pagination .page-numbers a.page-numbers,.wperf-lead-pagination .page-numbers span.page-numbers{display:inline-flex;align-items:center;justify-content:center;min-width:40px;height:40px;padding:0 12px;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#111827;font-size:14px;font-weight:700;line-height:1;text-decoration:none;transition:border-color .2s ease,background-color .2s ease,color .2s ease}.wperf-lead-pagination .page-numbers a.page-numbers:hover,.wperf-lead-pagination .page-numbers a.page-numbers:focus{border-color:#111827;background:#f3f4f6;color:#111827}.wperf-lead-pagination .page-numbers span.page-numbers.current{border-color:#111827;background:#111827;color:#fff}.wperf-lead-pagination .page-numbers span.page-numbers.dots{min-width:auto;padding:0 4px;border-color:transparent;background:transparent}.wperf-user-dashboard-card,.wperf-shared-page-card,.wperf-public-share-card{max-width:1180px;border:0;border-radius:28px;background:#f4f7fb;box-shadow:0 24px 70px rgba(15,23,42,.12)}.wperf-user-dashboard,.wperf-shared-page,.wperf-public-share-page{padding:34px;background:linear-gradient(180deg,#f8fafc 0%,#eef3f8 100%)}.wperf-user-dashboard-header,.wperf-lead-desk-header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;padding:24px 26px;margin-bottom:22px;border:1px solid #dce4ee;border-radius:20px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,.06)}.wperf-user-dashboard-header .wperf-copy,.wperf-lead-desk-header .wperf-copy{margin-bottom:0}.wperf-dashboard-stats{grid-template-columns:repeat(3,minmax(0,1fr));margin:0 0 22px}.wperf-dashboard-stats .wperf-stat-box{position:relative;min-height:116px;padding:20px 22px;border:1px solid #dce4ee;border-radius:18px;background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.045);overflow:hidden}.wperf-dashboard-stats .wperf-stat-box:after{content:"";position:absolute;right:-20px;bottom:-34px;width:92px;height:92px;border-radius:50%;background:rgba(15,23,42,.035)}.wperf-dashboard-stats .wperf-stat-label{position:relative;z-index:1;font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}.wperf-dashboard-stats .wperf-stat-value{position:relative;z-index:1;font-size:24px;line-height:1.25}.wperf-dashboard-panel{padding:24px;margin-top:22px;border:1px solid #dce4ee;border-radius:22px;background:#fff;box-shadow:0 14px 34px rgba(15,23,42,.055)}.wperf-referral-card-panel>.wperf-subtitle{margin-top:0}.wperf-referral-card-panel .wperf-share-card{border-radius:22px;box-shadow:0 22px 46px rgba(15,23,42,.2);transition:transform .25s ease,box-shadow .25s ease}.wperf-referral-card-panel .wperf-share-card-link:hover .wperf-share-card{transform:translateY(-3px);box-shadow:0 28px 54px rgba(15,23,42,.24)}.wperf-share-card{aspect-ratio:16/7;min-height:0;border-radius:24px;padding:34px;margin-top:14px;background-color:#111827;box-shadow:0 20px 50px rgba(15,23,42,.2)}.wperf-share-overlay{background:linear-gradient(135deg,rgba(15,23,42,.1),rgba(15,23,42,.78))}.wperf-share-kicker{display:inline-flex;padding:7px 10px;border:1px solid rgba(255,255,255,.28);border-radius:999px;background:rgba(15,23,42,.18);font-weight:700}.wperf-share-name{font-size:36px;line-height:1.1}.wperf-share-code{padding:11px 16px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.14)}.wperf-share-message{font-size:19px;line-height:1.55}.wperf-referral-card-panel .wperf-share-actions{padding-top:2px}.wperf-referral-card-panel .wperf-share-link-box{padding:18px;border-color:#dce4ee;background:#f8fafc}.wperf-dashboard-brochure-btn{display:flex!important;width:max-content;margin:22px auto 0}.wperf-referral-list-add-btn{flex:0 0 auto;min-height:44px;padding:0 16px}.wperf-section-heading{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:16px}.wperf-section-heading .wperf-subtitle{margin:3px 0 0}.wperf-section-eyebrow{display:block;color:#64748b;font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}.wperf-section-count{display:inline-flex;align-items:center;justify-content:center;min-width:42px;height:42px;padding:0 12px;border-radius:999px;background:#111827;color:#fff;font-size:14px;font-weight:800}.wperf-table-wrap{overflow:hidden;border:1px solid #dce4ee;border-radius:16px;background:#fff}.wperf-referral-list-table th,.wperf-project-table th,.wperf-lead-table th,.wperf-lead-child-table th{padding:14px 16px;background:#eef2f7;color:#334155;font-size:12px;font-weight:800;letter-spacing:.04em;text-transform:uppercase}.wperf-referral-list-table td,.wperf-project-table td{padding:15px 16px}.wperf-referral-list-table tbody tr:hover,.wperf-project-table tbody tr:hover{background:#f8fafc}.wperf-status-badge{display:inline-flex;align-items:center;min-height:28px;padding:0 10px;border:1px solid #cbd5e1;border-radius:999px;background:#f8fafc;color:#334155;font-size:12px;font-weight:700}.wperf-empty-state{padding:34px;border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;color:#64748b;text-align:center}.wperf-shared-page-card{overflow:visible}.wperf-shared-page{padding-top:26px}.wperf-shared-page .wperf-shared-banner-image{border-radius:22px;box-shadow:0 18px 42px rgba(15,23,42,.14)}.wperf-shared-page .wperf-notice{margin-top:22px}.wperf-shared-page .wperf-brochure-row{justify-content:center;padding:20px;margin-top:24px;border:1px solid #dce4ee;border-radius:18px;background:#fff}.wperf-project-offers{padding:24px;margin-top:26px;border:1px solid #dce4ee;border-radius:22px;background:#fff;box-shadow:0 14px 34px rgba(15,23,42,.055)}.wperf-project-link{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:0 15px;border-radius:9px;background:#111827;color:#fff!important;font-size:13px;font-weight:800;text-decoration:none!important}.wperf-project-link:hover,.wperf-project-link:focus{background:#334155;color:#fff!important}.wperf-agent-login-wrap{max-width:560px;margin:50px auto;border:0;border-radius:24px;background:#eef3f8;box-shadow:0 24px 70px rgba(15,23,42,.14)}.wperf-agent-login-shell{padding:10px}.wperf-agent-login-header{padding:28px 28px 22px;border-radius:18px 18px 0 0;background:#111827}.wperf-agent-login-header .wperf-section-eyebrow{color:#cbd5e1}.wperf-agent-login-header .wperf-title{margin-top:6px;color:#fff}.wperf-agent-login-header .wperf-copy{margin-bottom:0;color:#cbd5e1}.wperf-agent-login-form{padding:26px 28px 28px;border-radius:0 0 18px 18px;background:#fff}.wperf-agent-login-form #loginform{margin:0}.wperf-agent-login-form #loginform p{margin:0 0 18px}.wperf-agent-login-form #loginform label{display:block;margin-bottom:8px;color:#111827;font-size:14px;font-weight:700}.wperf-agent-login-form #loginform input[type=text],.wperf-agent-login-form #loginform input[type=password]{display:block;width:100%;height:50px;padding:0 15px;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:11px;background:#fff;color:#111827;font-size:15px}.wperf-agent-login-form #loginform input[type=text]:focus,.wperf-agent-login-form #loginform input[type=password]:focus{border-color:#111827;outline:2px solid rgba(17,24,39,.12);outline-offset:1px}.wperf-agent-login-form #loginform .login-remember label{display:flex;align-items:center;gap:8px;margin:0;font-weight:500}.wperf-agent-login-form #loginform .login-remember input{width:17px;height:17px;margin:0}.wperf-agent-login-form #loginform .login-submit{margin-bottom:0}.wperf-agent-login-form #wp-submit{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:50px;padding:0 20px;border:0;border-radius:11px;background:#111827;color:#fff;font-size:15px;font-weight:800;cursor:pointer}.wperf-agent-login-form #wp-submit:hover,.wperf-agent-login-form #wp-submit:focus{background:#334155}.wperf-lead-desk-card{border:0;border-radius:24px;background:#eef3f8;box-shadow:0 24px 70px rgba(15,23,42,.12)}.wperf-lead-desk-shell{padding:30px!important}.wperf-lead-toolbar{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 18px;margin-bottom:18px;border:1px solid #dce4ee;border-radius:16px;background:#fff;box-shadow:0 10px 24px rgba(15,23,42,.045)}.wperf-lead-summary{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.wperf-lead-summary span{display:inline-flex;align-items:center;min-height:34px;padding:0 11px;border-radius:999px;background:#eef2f7;color:#475569;font-size:12px;font-weight:700}.wperf-lead-summary strong{margin-right:4px;color:#0f172a;font-size:14px}.wperf-lead-search-form{margin:0}.wperf-lead-search-form p{margin:0}.wperf-lead-table-wrap{border:1px solid #dce4ee;border-radius:18px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,.05)}.wperf-lead-table{min-width:1180px}.wperf-lead-table td{padding:13px 14px;vertical-align:middle}.wperf-lead-row{transition:background-color .2s ease}.wperf-lead-row:hover{background:#eef6ff!important}.wperf-lead-status{min-height:38px!important;padding:0 10px!important;border-color:#cbd5e1!important;border-radius:9px!important;background:#fff!important}.wperf-lead-remarks{min-height:64px!important;padding:9px 10px!important;border-color:#cbd5e1!important;border-radius:9px!important;background:#fff!important}.wperf-customer-remarks-readonly{min-width:190px;max-width:260px;min-height:44px;padding:9px 10px;border:1px solid #e2e8f0;border-radius:9px;background:#f8fafc;color:#475569;font-size:13px;line-height:1.45;white-space:pre-wrap;word-break:break-word}.wperf-add-referral-modal textarea#wperf_add_referral_customer_remarks,.wperf-customer-remarks-input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;background:#fff;color:#111827;font:inherit;line-height:1.45;resize:vertical}.wperf-customer-remarks-cell{min-width:260px}.wperf-customer-remarks-cell .wperf-btn-save-customer-remarks{min-height:34px;margin-top:8px;padding:0 12px;font-size:12px}.wperf-customer-remarks-msg{display:inline-block;margin-left:8px;font-size:12px;font-weight:700}.wperf-btn-save-lead,.wperf-btn-view-referrals,.wperf-btn-close-referrals{border-radius:9px!important}.wperf-lead-popup-panel{border-color:#cbd5e1!important;border-radius:16px!important;background:#f8fafc!important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.7)!important}.wperf-lead-child-table{background:#fff;border-radius:12px;overflow:hidden}.wperf-public-share-wrap{display:flex;align-items:center;min-height:70vh;padding-left:24px;padding-right:24px;box-sizing:border-box}.wperf-public-share-card{width:min(1180px,100%);max-width:1180px}.wperf-public-share-page{padding:38px}.wperf-public-share-page .wperf-share-card{width:100%;aspect-ratio:16/9;min-height:520px;margin-top:0;background-size:contain!important;background-repeat:no-repeat!important;background-position:center!important}.wperf-public-share-page .wperf-share-content{max-width:720px}.wperf-public-share-page>.wperf-actions{justify-content:center;margin-top:28px}.wperf-virtual-page{padding:30px 16px; width: 100%}@media (max-width:980px){.wperf-dashboard-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.wperf-lead-toolbar{align-items:stretch;flex-direction:column}.wperf-lead-search-form p{width:100%}.wperf-lead-search-form input[type=search]{flex:1;width:auto;max-width:none}}@media (max-width:767px){.wperf-user-dashboard,.wperf-shared-page,.wperf-public-share-page,.wperf-lead-desk-shell{padding:18px!important}.wperf-user-dashboard-header,.wperf-lead-desk-header{align-items:stretch;flex-direction:column;padding:20px}.wperf-user-dashboard-header .wperf-actions,.wperf-lead-desk-header .wperf-actions{margin-top:0}.wperf-dashboard-stats{grid-template-columns:1fr}.wperf-dashboard-panel,.wperf-project-offers{padding:18px}.wperf-section-heading{align-items:flex-start;flex-wrap:wrap}.wperf-share-card{aspect-ratio:16/9;min-height:0;padding:24px}.wperf-share-name{font-size:30px}.wperf-share-message{font-size:16px}.wperf-copy-link-row{align-items:stretch;flex-direction:column}.wperf-copy-link-btn{min-height:42px}.wperf-lead-search-form p{align-items:stretch;flex-direction:column}.wperf-lead-search-form .wperf-btn{width:100%}.wperf-agent-login-wrap{margin:24px auto}.wperf-agent-login-header,.wperf-agent-login-form{padding:22px}.wperf-referral-list-add-btn{width:100%}.wperf-public-share-page .wperf-share-card{aspect-ratio:16/9;min-height:0}}@media (max-width:767px){.wperf-tab-panel,.wperf-logged-in,.wperf-dashboard{padding:20px}.wperf-title{font-size:24px}.wperf-stats,.wperf-referral-grid{grid-template-columns:1fr}.wperf-shared-banner-image-desktop{display:none!important}.wperf-shared-banner-image-mobile{display:block!important}}';
 	}
 
 	/**
@@ -3806,6 +3899,51 @@ document.addEventListener('DOMContentLoaded', function () {
 				}
 				form.dataset.wperfSubmitting = '1';
 				HTMLFormElement.prototype.submit.call(form);
+			});
+		});
+	});
+
+	document.querySelectorAll('[data-wperf-customer-remarks-table]').forEach(function (tableWrap) {
+		var endpoint = tableWrap.getAttribute('data-wperf-customer-remarks-url') || '';
+		var nonce = tableWrap.getAttribute('data-wperf-customer-remarks-nonce') || '';
+
+		tableWrap.querySelectorAll('.wperf-btn-save-customer-remarks').forEach(function (button) {
+			button.addEventListener('click', function () {
+				var row = button.closest('tr');
+				var input = row ? row.querySelector('.wperf-customer-remarks-input') : null;
+				var message = row ? row.querySelector('.wperf-customer-remarks-msg') : null;
+				var entryId = button.getAttribute('data-entry-id') || '';
+				if (!endpoint || !nonce || !entryId || !input) {
+					return;
+				}
+
+				button.disabled = true;
+				if (message) {
+					message.textContent = '';
+				}
+
+				var data = new FormData();
+				data.append('action', 'wperf_update_customer_remarks');
+				data.append('entry_id', entryId);
+				data.append('customer_remarks', input.value);
+				data.append('nonce', nonce);
+
+				fetch(endpoint, { method: 'POST', body: data, credentials: 'same-origin' })
+					.then(function (response) { return response.json(); })
+					.then(function (result) {
+						button.disabled = false;
+						if (message) {
+							message.textContent = result && result.data && result.data.message ? result.data.message : (result.success ? 'Saved.' : 'Could not save.');
+							message.style.color = result.success ? '#047857' : '#dc2626';
+						}
+					})
+					.catch(function () {
+						button.disabled = false;
+						if (message) {
+							message.textContent = 'Could not save.';
+							message.style.color = '#dc2626';
+						}
+					});
 			});
 		});
 	});
