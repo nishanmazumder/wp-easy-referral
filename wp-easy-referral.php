@@ -451,6 +451,8 @@ final class WPERF_Referral_Auth_System {
 		if ( ! get_role( 'referral_help_agent' ) ) {
 			add_role( 'referral_help_agent', __( 'Referral Help Agent', 'wp-easy-referral' ), array( 'read' => true ) );
 		}
+
+		$this->repair_missing_referral_codes();
 	}
 
 	/**
@@ -1288,8 +1290,13 @@ final class WPERF_Referral_Auth_System {
 			$this->safe_redirect_with_notice( 'register', 'email_exists' );
 		}
 
-		if ( $this->phone_exists_anywhere( $phone ) ) {
+		if ( $this->get_user_by_phone( $phone ) instanceof WP_User ) {
 			$this->safe_redirect_with_notice( 'register', 'phone_exists' );
+		}
+
+		$existing_lead = $this->get_unregistered_lead_by_phone( $phone );
+		if ( $existing_lead && '' !== (string) $existing_lead->referred_by_code && $this->get_user_id_by_referral_code( (string) $existing_lead->referred_by_code ) > 0 ) {
+			$referred_by_code = (string) $existing_lead->referred_by_code;
 		}
 
 		$username = $this->generate_unique_username( $display_name, $email, $phone );
@@ -1311,22 +1318,53 @@ final class WPERF_Referral_Auth_System {
 		update_user_meta( $user_id, self::META_PHONE, $phone );
 		update_user_meta( $user_id, self::META_REFERRAL_USER_NAME, $referral_user_name );
 		update_user_meta( $user_id, self::META_REFERRAL_USER_PHONE, $referral_user_phone );
+
+		if ( $existing_lead && '' !== (string) $existing_lead->referral_code ) {
+			$lead_referral_code = sanitize_text_field( (string) $existing_lead->referral_code );
+			$code_owner_id      = $this->get_user_id_by_referral_code( $lead_referral_code );
+
+			if ( $code_owner_id <= 0 || $code_owner_id === (int) $user_id ) {
+				update_user_meta( $user_id, self::META_REFERRAL_ID, $lead_referral_code );
+			}
+		}
+
 		$this->handle_user_register( $user_id );
 		$this->apply_referral_relationship( $user_id, $referred_by_code );
-		$this->insert_registration_entry(
-			array(
-				'user_id'              => $user_id,
-				'name'                 => $display_name,
-				'email'                => $email,
-				'phone'                => $phone,
-				'referral_user_name'   => '',
-				'referral_user_phone'  => '',
-				'referral_code'        => (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true ),
-				'referred_by_code'     => (string) get_user_meta( $user_id, self::META_REFERRED_BY_CODE, true ),
-				'source'               => '' !== (string) get_user_meta( $user_id, self::META_REFERRED_BY_CODE, true ) ? 'referred' : 'direct',
-				'user_source'          => $user_source,
-			)
-		);
+		$user_referral_code = $this->ensure_user_referral_code( $user_id );
+		$user_referred_by   = (string) get_user_meta( $user_id, self::META_REFERRED_BY_CODE, true );
+
+		if ( $existing_lead ) {
+			global $wpdb;
+			$wpdb->update(
+				$this->table_name,
+				array(
+					'user_id'          => $user_id,
+					'name'             => $display_name,
+					'email'            => $email,
+					'phone'            => $phone,
+					'referral_code'    => $user_referral_code,
+					'referred_by_code' => $user_referred_by,
+				),
+				array( 'id' => absint( $existing_lead->id ) ),
+				array( '%d', '%s', '%s', '%s', '%s', '%s' ),
+				array( '%d' )
+			);
+		} else {
+			$this->insert_registration_entry(
+				array(
+					'user_id'              => $user_id,
+					'name'                 => $display_name,
+					'email'                => $email,
+					'phone'                => $phone,
+					'referral_user_name'   => '',
+					'referral_user_phone'  => '',
+					'referral_code'        => $user_referral_code,
+					'referred_by_code'     => $user_referred_by,
+					'source'               => '' !== $user_referred_by ? 'referred' : 'direct',
+					'user_source'          => $user_source,
+				)
+			);
+		}
 
 		if ( $wants_to_refer && '' !== $referral_user_phone ) {
 			$referral_owner_code = (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true );
@@ -1542,9 +1580,7 @@ final class WPERF_Referral_Auth_System {
 			return;
 		}
 
-		if ( '' === (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true ) ) {
-			update_user_meta( $user_id, self::META_REFERRAL_ID, $this->generate_unique_referral_id( $user_id ) );
-		}
+		$this->ensure_user_referral_code( $user_id );
 
 		if ( '' === (string) get_user_meta( $user_id, self::META_SHARE_CLICKS, true ) ) {
 			update_user_meta( $user_id, self::META_SHARE_CLICKS, 0 );
@@ -1710,6 +1746,32 @@ final class WPERF_Referral_Auth_System {
 
 
 	/**
+	 * Find an unregistered referral lead by phone.
+	 *
+	 * @param string $phone Phone number.
+	 * @return object|null
+	 */
+	private function get_unregistered_lead_by_phone( $phone ) {
+		global $wpdb;
+
+		$phone = $this->normalize_phone( (string) $phone );
+		if ( '' === $phone ) {
+			return null;
+		}
+
+		$lead = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT id, referral_code, referred_by_code FROM {$this->table_name} WHERE user_id = 0 AND (phone = %s OR referral_user_phone = %s) ORDER BY id ASC LIMIT 1",
+				$phone,
+				$phone
+			)
+		);
+
+		return is_object( $lead ) ? $lead : null;
+	}
+
+
+	/**
 	 * Insert entry into custom registrations table.
 	 *
 	 * @param array $data Registration data.
@@ -1718,16 +1780,26 @@ final class WPERF_Referral_Auth_System {
 	private function insert_registration_entry( $data ) {
 		global $wpdb;
 
+		$user_id       = isset( $data['user_id'] ) ? absint( $data['user_id'] ) : 0;
+		$name          = isset( $data['name'] ) ? sanitize_text_field( (string) $data['name'] ) : '';
+		$referral_code = isset( $data['referral_code'] ) ? sanitize_text_field( (string) $data['referral_code'] ) : '';
+
+		if ( '' === $referral_code ) {
+			$referral_code = $user_id > 0
+				? $this->ensure_user_referral_code( $user_id )
+				: $this->generate_unique_referral_id( 0, $name );
+		}
+
 		$wpdb->insert(
 			$this->table_name,
 			array(
-				'user_id'             => isset( $data['user_id'] ) ? absint( $data['user_id'] ) : 0,
-				'name'                => isset( $data['name'] ) ? sanitize_text_field( (string) $data['name'] ) : '',
+				'user_id'             => $user_id,
+				'name'                => $name,
 				'email'               => isset( $data['email'] ) ? sanitize_email( (string) $data['email'] ) : '',
 				'phone'               => isset( $data['phone'] ) ? $this->normalize_phone( (string) $data['phone'] ) : '',
 				'referral_user_name'  => isset( $data['referral_user_name'] ) ? sanitize_text_field( (string) $data['referral_user_name'] ) : '',
 				'referral_user_phone' => isset( $data['referral_user_phone'] ) ? $this->normalize_phone( (string) $data['referral_user_phone'] ) : '',
-				'referral_code'       => isset( $data['referral_code'] ) ? sanitize_text_field( (string) $data['referral_code'] ) : '',
+				'referral_code'       => $referral_code,
 				'referred_by_code'    => isset( $data['referred_by_code'] ) ? sanitize_text_field( (string) $data['referred_by_code'] ) : '',
 				'share_clicks'        => isset( $data['share_clicks'] ) ? absint( $data['share_clicks'] ) : 0,
 				'source'              => isset( $data['source'] ) ? sanitize_key( (string) $data['source'] ) : 'manual',
@@ -1769,7 +1841,9 @@ final class WPERF_Referral_Auth_System {
 	 * @return bool
 	 */
 	public function maybe_hide_admin_bar( $show ) {
-		if ( $this->current_user_is_referral_user() ) {
+		$user = wp_get_current_user();
+
+		if ( $this->current_user_is_referral_user() || ( $user instanceof WP_User && in_array( 'referral_help_agent', (array) $user->roles, true ) ) ) {
 			return false;
 		}
 
@@ -2337,7 +2411,7 @@ final class WPERF_Referral_Auth_System {
 
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT id, registered_at, name, email, phone, status, remarks, customer_remarks FROM {$this->table_name} WHERE referred_by_code = %s ORDER BY registered_at DESC",
+				"SELECT id, registered_at, name, email, phone, referral_code, status, remarks, customer_remarks FROM {$this->table_name} WHERE referred_by_code = %s ORDER BY registered_at DESC",
 				$referral_code
 			)
 		);
@@ -2504,6 +2578,7 @@ final class WPERF_Referral_Auth_System {
 															<th><?php esc_html_e( 'Name', 'wp-easy-referral' ); ?></th>
 															<th><?php esc_html_e( 'Mail', 'wp-easy-referral' ); ?></th>
 															<th><?php esc_html_e( 'Phone', 'wp-easy-referral' ); ?></th>
+															<th><?php esc_html_e( 'Referral Code', 'wp-easy-referral' ); ?></th>
 															<th><?php esc_html_e( 'Status', 'wp-easy-referral' ); ?></th>
 															<th><?php esc_html_e( 'Customer Remarks', 'wp-easy-referral' ); ?></th>
 															<th><?php esc_html_e( 'Agent Remarks', 'wp-easy-referral' ); ?></th>
@@ -2512,7 +2587,7 @@ final class WPERF_Referral_Auth_System {
 													</thead>
 													<tbody>
 														<?php if ( empty( $children ) ) : ?>
-															<tr><td colspan="8"><?php esc_html_e( 'No referred users found.', 'wp-easy-referral' ); ?></td></tr>
+															<tr><td colspan="9"><?php esc_html_e( 'No referred users found.', 'wp-easy-referral' ); ?></td></tr>
 														<?php endif; ?>
 														<?php foreach ( $children as $child ) : ?>
 															<tr data-id="<?php echo esc_attr( $child->id ); ?>">
@@ -2520,6 +2595,7 @@ final class WPERF_Referral_Auth_System {
 																<td><?php echo esc_html( $child->name ); ?></td>
 																<td><?php echo esc_html( $this->mask_lead_email( $child->email ) ); ?></td>
 																<td><?php echo esc_html( $this->mask_lead_phone( $child->phone ) ); ?></td>
+																<td><strong><?php echo esc_html( (string) $child->referral_code ); ?></strong></td>
 																<td>
 																	<select class="wperf-lead-status" style="width:130px;padding:6px;border-radius:6px;border:1px solid #d1d5db;font-family:inherit;font-size:14px;">
 																		<?php foreach ( $statuses as $status_opt ) : ?>
@@ -3073,15 +3149,118 @@ final class WPERF_Referral_Auth_System {
 	}
 
 	/**
-	 * Generate unique referral code.
+	 * Ensure a registered referral user has a referral code.
 	 *
+	 * Existing codes are always preserved. If user meta is missing but an existing
+	 * registration row already has a code, that code is reused.
+	 *
+	 * @param int    $user_id        User ID.
+	 * @param string $preferred_code Optional code to reuse for a converted lead.
 	 * @return string
 	 */
-	private function generate_unique_referral_id( $user_id = 0 ) {
-		$user       = $user_id > 0 ? get_userdata( $user_id ) : false;
-		$name_part  = $user instanceof WP_User ? sanitize_title( $user->display_name ) : 'user';
-		$name_part  = '' !== $name_part ? $name_part : 'user';
-		$name_part  = substr( $name_part, 0, 20 );
+	private function ensure_user_referral_code( $user_id, $preferred_code = '' ) {
+		global $wpdb;
+
+		$user_id = absint( $user_id );
+		$user    = $user_id > 0 ? get_userdata( $user_id ) : false;
+		if ( ! $user instanceof WP_User ) {
+			return '';
+		}
+
+		$current_code = sanitize_text_field( (string) get_user_meta( $user_id, self::META_REFERRAL_ID, true ) );
+		if ( '' !== $current_code ) {
+			return $current_code;
+		}
+
+		$preferred_code = sanitize_text_field( (string) $preferred_code );
+		if ( '' === $preferred_code ) {
+			$preferred_code = sanitize_text_field(
+				(string) $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT referral_code FROM {$this->table_name} WHERE user_id = %d AND referral_code <> '' ORDER BY id ASC LIMIT 1",
+						$user_id
+					)
+				)
+			);
+		}
+
+		if ( '' !== $preferred_code ) {
+			$owner_id = $this->get_user_id_by_referral_code( $preferred_code );
+			if ( $owner_id <= 0 || $owner_id === $user_id ) {
+				update_user_meta( $user_id, self::META_REFERRAL_ID, $preferred_code );
+				return $preferred_code;
+			}
+		}
+
+		$code = $this->generate_unique_referral_id( $user_id );
+		update_user_meta( $user_id, self::META_REFERRAL_ID, $code );
+
+		return $code;
+	}
+
+	/**
+	 * Backfill missing referral codes once for existing users and entries.
+	 *
+	 * Existing non-empty codes are never changed.
+	 *
+	 * @return void
+	 */
+	private function repair_missing_referral_codes() {
+		if ( '1' === (string) get_option( 'wperf_referral_codes_backfilled_v1', '' ) ) {
+			return;
+		}
+
+		global $wpdb;
+		$user_ids = get_users(
+			array(
+				'role'        => self::ROLE_KEY,
+				'fields'      => 'ids',
+				'count_total' => false,
+			)
+		);
+
+		foreach ( $user_ids as $user_id ) {
+			$this->ensure_user_referral_code( absint( $user_id ) );
+		}
+
+		$rows = $wpdb->get_results(
+			"SELECT id, user_id, name FROM {$this->table_name} WHERE referral_code = '' OR referral_code IS NULL ORDER BY id ASC"
+		);
+
+		if ( is_array( $rows ) ) {
+			foreach ( $rows as $row ) {
+				$code = absint( $row->user_id ) > 0
+					? $this->ensure_user_referral_code( absint( $row->user_id ) )
+					: $this->generate_unique_referral_id( 0, (string) $row->name );
+
+				if ( '' !== $code ) {
+					$wpdb->update(
+						$this->table_name,
+						array( 'referral_code' => $code ),
+						array( 'id' => absint( $row->id ) ),
+						array( '%s' ),
+						array( '%d' )
+					);
+				}
+			}
+		}
+
+		update_option( 'wperf_referral_codes_backfilled_v1', '1', false );
+	}
+
+	/**
+	 * Generate unique referral code.
+	 *
+	 * @param int    $user_id      User ID.
+	 * @param string $display_name Optional display name for lead-only entries.
+	 * @return string
+	 */
+	private function generate_unique_referral_id( $user_id = 0, $display_name = '' ) {
+		$user      = $user_id > 0 ? get_userdata( $user_id ) : false;
+		$name      = $user instanceof WP_User ? (string) $user->display_name : sanitize_text_field( (string) $display_name );
+		$name_part = sanitize_title( $name );
+		$name_part = '' !== $name_part ? $name_part : 'user';
+		$name_part = substr( $name_part, 0, 20 );
 
 		for ( $attempts = 0; $attempts < 50; $attempts++ ) {
 			$code = $name_part . '-' . wp_rand( 1000, 9999 );
@@ -3090,9 +3269,12 @@ final class WPERF_Referral_Auth_System {
 			}
 		}
 
-		return $name_part . '-' . time();
-	}
+		do {
+			$code = $name_part . '-' . time() . '-' . wp_rand( 100, 999 );
+		} while ( $this->referral_code_exists( $code ) );
 
+		return $code;
+	}
 
 	/**
 	 * Check if referral code exists.
@@ -3101,7 +3283,25 @@ final class WPERF_Referral_Auth_System {
 	 * @return bool
 	 */
 	private function referral_code_exists( $code ) {
-		return $this->get_user_id_by_referral_code( $code ) > 0;
+		global $wpdb;
+
+		$code = sanitize_text_field( (string) $code );
+		if ( '' === $code ) {
+			return false;
+		}
+
+		if ( $this->get_user_id_by_referral_code( $code ) > 0 ) {
+			return true;
+		}
+
+		$count = (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(*) FROM {$this->table_name} WHERE referral_code = %s",
+				$code
+			)
+		);
+
+		return $count > 0;
 	}
 
 	/**
